@@ -162,7 +162,7 @@ graph TB
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/davidebert/minersentinel.git
+   git clone https://github.com/dcbert/miner-sentinel.git
    cd minersentinel
    ```
 
@@ -321,8 +321,8 @@ This project is licensed under the MIT License.
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/davidebert/minersentinel/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/davidebert/minersentinel/discussions)
+- **Issues**: [GitHub Issues](https://github.com/dcbert/miner-sentinel/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/dcbert/miner-sentinel/discussions)
 
 ---
 

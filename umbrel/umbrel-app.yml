@@ -53,16 +53,16 @@ releaseNotes: >-
   v1.0.1: Stability improvements and bug fixes for Avalon device collection.
 
 developer: Davide Bert
-website: https://github.com/davidebert/minersentinel
-repo: https://github.com/davidebert/minersentinel
-support: https://github.com/davidebert/minersentinel/issues
+website: https://github.com/dcbert/miner-sentinel
+repo: https://github.com/dcbert/miner-sentinel
+support: https://github.com/dcbert/miner-sentinel/issues
 port: 3080
 gallery:
-  - https://raw.githubusercontent.com/davidebert/minersentinel/main/docs/images/overview-dashboard.png
-  - https://raw.githubusercontent.com/davidebert/minersentinel/main/docs/images/mining-dashboard.png
-  - https://raw.githubusercontent.com/davidebert/minersentinel/main/docs/images/analytics-dashboard.png
-  - https://raw.githubusercontent.com/davidebert/minersentinel/main/docs/images/device-details.png
-  - https://raw.githubusercontent.com/davidebert/minersentinel/main/docs/images/settings-page.png
+  - https://raw.githubusercontent.com/dcbert/miner-sentinel/main/docs/images/overview-dashboard.png
+  - https://raw.githubusercontent.com/dcbert/miner-sentinel/main/docs/images/mining-dashboard.png
+  - https://raw.githubusercontent.com/dcbert/miner-sentinel/main/docs/images/analytics-dashboard.png
+  - https://raw.githubusercontent.com/dcbert/miner-sentinel/main/docs/images/device-details.png
+  - https://raw.githubusercontent.com/dcbert/miner-sentinel/main/docs/images/settings-page.png
 path: ""
 defaultUsername: "satoshi"
 defaultPassword: "21millionBTC!"
