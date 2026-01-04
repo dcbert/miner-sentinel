@@ -1,6 +1,6 @@
 # MinerSentinel
 
-**A self-hosted Bitcoin mining monitoring dashboard for BitAxe and Avalon ASIC devices**
+**A self-hosted Bitcoin mining monitoring dashboard for Bitaxe and Avalon ASIC devices**
 
 ![MinerSentinel Overview](docs/images/overview-dashboard.png)
 <!-- TODO: Add screenshot of the Overview Dashboard showing fleet summary, total hashrate, and device status cards -->
@@ -13,7 +13,7 @@
 
 ## Overview
 
-MinerSentinel is a comprehensive monitoring solution designed for Bitcoin home miners running BitAxe and Avalon Nano 3s ASIC devices. Built with a modern React frontend and Django backend, it provides real-time visibility into your mining fleet's performance, health metrics, and pool statistics—all running locally on your own hardware.
+MinerSentinel is a comprehensive monitoring solution designed for Bitcoin home miners running Bitaxe and Avalon Nano 3s ASIC devices. Built with a modern React frontend and Django backend, it provides real-time visibility into your mining fleet's performance, health metrics, and pool statistics—all running locally on your own hardware.
 
 ### Why MinerSentinel?
 
@@ -41,7 +41,7 @@ Home miners often run multiple devices across different manufacturers, each with
 ### Mining Dashboard
 ![Mining Dashboard](docs/images/mining-dashboard.png)
 <!-- TODO: Capture the mining page showing:
-     - Individual device cards for BitAxe and Avalon miners
+     - Individual device cards for Bitaxe and Avalon miners
      - Real-time hashrate, temperature, and power per device
      - Pool statistics section (CKPool or PublicPool)
      - Best share/difficulty tracking
@@ -82,7 +82,7 @@ Home miners often run multiple devices across different manufacturers, each with
 ## Features
 
 ### 🔌 Multi-Device Support
-- **BitAxe devices**: Full support for all BitAxe variants (Ultra, Hex, etc.) via HTTP API
+- **Bitaxe devices**: Full support for all Bitaxe variants (Ultra, Hex, etc.) via HTTP API
 - **Avalon Nano 3s**: Native support using the cgminer socket API (port 4028)
 - **Dynamic management**: Add or remove devices through the web UI without service restarts
 
@@ -138,7 +138,7 @@ graph TB
     FE <--> BE
     BE <--> DB
     DS <--> DB
-    DS --> BitAxe["BitAxe Devices"]
+    DS --> Bitaxe["Bitaxe Devices"]
     DS --> Avalon["Avalon Nano Devices"]
 ```
 
@@ -155,7 +155,7 @@ graph TB
 
 ### Prerequisites
 - Docker and Docker Compose installed
-- BitAxe devices accessible on your network (HTTP API enabled)
+- Bitaxe devices accessible on your network (HTTP API enabled)
 - Avalon devices accessible on your network (port 4028 open)
 
 ### Installation
@@ -205,7 +205,7 @@ Add devices through the Settings page or Django Admin panel:
 | Field | Description | Example |
 |-------|-------------|---------|
 | Device ID | Unique identifier | `bitaxe-01` |
-| Device Name | Friendly name | `Living Room BitAxe` |
+| Device Name | Friendly name | `Living Room Bitaxe` |
 | IP Address | Device network address | `192.168.1.100` |
 | Active | Enable/disable monitoring | `true` |
 
@@ -235,7 +235,7 @@ Configure polling behavior through the Settings page:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/bitaxe/devices/` | List all BitAxe devices |
+| GET | `/api/bitaxe/devices/` | List all Bitaxe devices |
 | GET | `/api/bitaxe/stats/<id>/` | Get device statistics |
 | GET | `/api/avalon/devices/` | List all Avalon devices |
 | GET | `/api/avalon/stats/<id>/` | Get device statistics |
@@ -312,7 +312,7 @@ This project is licensed under the MIT License.
 
 ## Acknowledgments
 
-- [BitAxe](https://github.com/skot/bitaxe) - Open-source Bitcoin ASIC miner
+- [Bitaxe](https://github.com/skot/bitaxe) - Open-source Bitcoin ASIC miner
 - [Canaan Avalon](https://canaan.io/) - Avalon Nano 3s mining devices
 - [Shadcn UI](https://ui.shadcn.com/) - Beautiful UI components
 - [Umbrel](https://umbrel.com/) - Self-hosting platform
