@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: minersentinel-postgres
+    env_file: ".env"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - minersentinel-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minersentinel"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: your-registry.example.com/minersentinel-backend:latest
+    container_name: minersentinel-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: ".env"
+    ports:
+      - "8000:8000"
+    networks:
+      - minersentinel-network
+    restart: unless-stopped
+    command: >
+      sh -c "
+        python manage.py migrate &&
+        python manage.py collectstatic --noinput &&
+        gunicorn minersentinel.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 120
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/bitaxe/devices/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    image: your-registry.example.com/minersentinel-frontend:latest
+    container_name: minersentinel-frontend
+    env_file: ".env"
+    ports:
+      - "3000:80"
+    networks:
+      - minersentinel-network
+    restart: unless-stopped
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  data-service:
+    image: your-registry.example.com/minersentinel-data-service:latest
+    container_name: minersentinel-data-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: ".env"
+    networks:
+      - minersentinel-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  minersentinel-network:
+    driver: bridge

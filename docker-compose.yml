@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: minersentinel-postgres
+    restart: unless-stopped
+    env_file: ".env"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - minersentinel-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-minersentinel}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: minersentinel-backend
+    restart: unless-stopped
+    env_file: ".env"
+    environment:
+      DJANGO_SUPERUSER_USERNAME: ${DEFAULT_USERNAME:-satoshi}
+      DJANGO_SUPERUSER_PASSWORD: ${DEFAULT_PASSWORD:-21millionBTC!}
+      DJANGO_SUPERUSER_EMAIL: "${DEFAULT_EMAIL:-satoshi@example.com}"
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - minersentinel-network
+    command: >
+      sh -c "python manage.py migrate &&
+              (python manage.py createsuperuser --no-input ||
+              echo 'Superuser already exists or created — winning!') &&
+              python manage.py runserver 0.0.0.0:8000"
+
+  data-service:
+    build:
+      context: ./data-service
+      dockerfile: Dockerfile
+    container_name: minersentinel-data-service
+    restart: unless-stopped
+    env_file: ".env"
+    volumes:
+      - ./data-service:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - minersentinel-network
+    command: python app.py
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: minersentinel-frontend
+    restart: unless-stopped
+    env_file: ".env"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - minersentinel-network
+    command: npm run dev -- --host 0.0.0.0
+
+networks:
+  minersentinel-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
