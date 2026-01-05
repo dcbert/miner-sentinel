@@ -2,11 +2,11 @@ manifestVersion: 1
 id: minersentinel
 category: bitcoin
 name: MinerSentinel
-version: "0.0.1"
-tagline: Unified monitoring dashboard for BitAxe and Avalon Bitcoin miners
+version: "1.0.0"
+tagline: Unified monitoring dashboard for Bitaxe and Avalon Bitcoin miners
 description: >-
   MinerSentinel is a self-hosted monitoring solution designed for Bitcoin home miners
-  running BitAxe and Avalon Nano 3s ASIC devices. It provides a centralized dashboard
+  running Bitaxe and Avalon Nano 3s ASIC devices. It provides a centralized dashboard
   to track performance, health, and profitability metrics across your entire mining fleet.
 
 
@@ -18,7 +18,7 @@ description: >-
 
   **Multi-Device Fleet Management**
 
-  Add unlimited BitAxe and Avalon miners through a simple web interface. Dynamic device
+  Add unlimited Bitaxe and Avalon miners through a simple web interface. Dynamic device
   management allows adding or removing devices without service restarts. Each device
   displays individual statistics with drill-down detail views.
 
