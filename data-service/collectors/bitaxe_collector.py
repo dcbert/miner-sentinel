@@ -224,7 +224,7 @@ class BitAxeCollector:
             default_device_name = system_info.get('hostname', device_id)
             cursor.execute("""
                 INSERT INTO bitaxe_devices (device_id, device_name, ip_address, is_active, created_at)
-                VALUES (%s, %s, %s, %s, NOW())
+                VALUES (%s, %s, %s, NOW())
                 ON CONFLICT (device_id) DO UPDATE SET
                     ip_address = EXCLUDED.ip_address
                 RETURNING id
