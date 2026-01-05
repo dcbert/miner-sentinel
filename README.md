@@ -1,6 +1,12 @@
-# MinerSentinel
+<p align="center">
+  <img src="docs/images/logo.svg" alt="MinerSentinel Logo" width="120" height="120">
+</p>
 
-**A self-hosted Bitcoin mining monitoring dashboard for Bitaxe and Avalon ASIC devices**
+<h1 align="center">MinerSentinel</h1>
+
+<p align="center">
+  <strong>A self-hosted Bitcoin mining monitoring dashboard for Bitaxe and Avalon ASIC devices</strong>
+</p>
 
 ![MinerSentinel Overview](docs/images/overview-dashboard.png)
 <!-- TODO: Add screenshot of the Overview Dashboard showing fleet summary, total hashrate, and device status cards -->
