@@ -32,8 +32,8 @@ class Migration(migrations.Migration):
                 ('hashrate_1d_ghs', models.FloatField(blank=True, help_text='1d hashrate converted to GH/s', null=True)),
             ],
             options={
-                'verbose_name': 'BitAxe Pool Statistics',
-                'verbose_name_plural': 'BitAxe Pool Statistics',
+                'verbose_name': 'Bitaxe Pool Statistics',
+                'verbose_name_plural': 'Bitaxe Pool Statistics',
                 'db_table': 'bitaxe_pool_stats',
                 'ordering': ['-recorded_at'],
                 'indexes': [models.Index(fields=['pool_address', '-recorded_at'], name='bitaxe_pool_pool_ad_5d49de_idx'), models.Index(fields=['-recorded_at'], name='bitaxe_pool_recorde_13331a_idx')],

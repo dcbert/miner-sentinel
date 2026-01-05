@@ -1,5 +1,5 @@
 """
-BitAxe device collector
+Bitaxe device collector
 """
 
 import logging
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class BitAxeCollector:
-    """Collects data from BitAxe mining devices."""
+    """Collects data from Bitaxe mining devices."""
 
     def __init__(self, database_url):
         self.database_url = database_url
@@ -24,7 +24,7 @@ class BitAxeCollector:
     def update_devices(self, devices):
         """Update the list of devices to monitor from database."""
         self.devices = devices
-        logger.info(f"Updated BitAxe device list: {len(devices)} devices")
+        logger.info(f"Updated Bitaxe device list: {len(devices)} devices")
         for device in devices:
             logger.info(f"  - {device['device_name']} ({device['device_id']}): {device['ip_address']}")
 
@@ -34,7 +34,7 @@ class BitAxeCollector:
 
     @retry(stop_max_attempt_number=3, wait_exponential_multiplier=1000, wait_exponential_max=10000)
     def _api_request(self, ip, endpoint):
-        """Make API request to BitAxe device with retry logic."""
+        """Make API request to Bitaxe device with retry logic."""
         url = f"http://{ip}/{endpoint}"
         logger.info(f"Requesting: {url}")
         response = requests.get(url, timeout=10)
@@ -42,7 +42,7 @@ class BitAxeCollector:
         return response.json()
 
     def restart_device(self, device_ip, device_id, device_name):
-        """Restart a BitAxe device via API."""
+        """Restart a Bitaxe device via API."""
         try:
             url = f"http://{device_ip}/api/system/restart"
             logger.info(f"Attempting to restart device {device_id} at {url}")
@@ -207,9 +207,9 @@ class BitAxeCollector:
             return f"{seconds}s"
 
     def collect_device_data(self, device_id, device_ip):
-        """Collect mining and hardware data from a single BitAxe device."""
+        """Collect mining and hardware data from a single Bitaxe device."""
         try:
-            # Fetch data from BitAxe API
+            # Fetch data from Bitaxe API
             system_info = self._api_request(device_ip, 'api/system/info')
 
             # Mark device as online since we got a successful response
@@ -218,21 +218,13 @@ class BitAxeCollector:
             conn = self.get_db_connection()
             cursor = conn.cursor()
 
-            # Auto-register device if not exists
-            # Note: We only set device_name for NEW devices (using hostname as default)
-            # Existing devices keep their user-set device_name
-            default_device_name = system_info.get('hostname', device_id)
+            # Get device name from database
             cursor.execute("""
-                INSERT INTO bitaxe_devices (device_id, device_name, ip_address, is_active, created_at)
-                VALUES (%s, %s, %s, NOW())
-                ON CONFLICT (device_id) DO UPDATE SET
-                    ip_address = EXCLUDED.ip_address
-                RETURNING id
-            """, (device_id, default_device_name, device_ip))
-
+                SELECT id, device_name FROM bitaxe_devices WHERE device_id = %s
+            """, (device_id,))
             device_row = cursor.fetchone()
-            device_db_id = device_row[0]
-            conn.commit()
+            device_db_id = device_row[0] if device_row else None
+            device_name = device_row[1] if device_row else device_id
 
             recorded_at = datetime.utcnow()
 
@@ -363,13 +355,13 @@ class BitAxeCollector:
         return value * multipliers.get(unit, 1)
 
     def collect_all_devices(self):
-        """Collect data from all BitAxe devices."""
+        """Collect data from all Bitaxe devices."""
         if not self.devices:
-            logger.warning("No BitAxe devices configured for collection")
+            logger.warning("No Bitaxe devices configured for collection")
             return
 
         for device in self.devices:
             device_id = device['device_id']
             device_ip = device['ip_address']
-            logger.info(f"Collecting data for BitAxe device: {device_id} at {device_ip}")
+            logger.info(f"Collecting data for Bitaxe device: {device_id} at {device_ip}")
             self.collect_device_data(device_id, device_ip)

@@ -3,7 +3,7 @@ from django.utils import timezone
 
 
 class BitAxeDevice(models.Model):
-    """BitAxe device registry."""
+    """Bitaxe device registry."""
     device_id = models.CharField(max_length=50, unique=True, db_index=True)
     device_name = models.CharField(max_length=100)
     ip_address = models.GenericIPAddressField()
@@ -20,7 +20,7 @@ class BitAxeDevice(models.Model):
 
 
 class BitAxeMiningStats(models.Model):
-    """BitAxe mining statistics."""
+    """Bitaxe mining statistics."""
     device = models.ForeignKey(BitAxeDevice, on_delete=models.CASCADE, related_name='mining_stats')
     recorded_at = models.DateTimeField(db_index=True)
     hashrate_ghs = models.FloatField(help_text="Hash rate in GH/s")
@@ -45,7 +45,7 @@ class BitAxeMiningStats(models.Model):
 
 
 class BitAxeHardwareLog(models.Model):
-    """BitAxe hardware metrics (power, temperature, etc.)."""
+    """Bitaxe hardware metrics (power, temperature, etc.)."""
     device = models.ForeignKey(BitAxeDevice, on_delete=models.CASCADE, related_name='hardware_logs')
     recorded_at = models.DateTimeField(db_index=True)
     power_watts = models.FloatField(help_text="Power consumption in Watts")
@@ -68,7 +68,7 @@ class BitAxeHardwareLog(models.Model):
 
 
 class BitAxeSystemInfo(models.Model):
-    """Extended BitAxe system information."""
+    """Extended Bitaxe system information."""
     device = models.ForeignKey(BitAxeDevice, on_delete=models.CASCADE, related_name='system_info')
     recorded_at = models.DateTimeField(db_index=True)
 
@@ -144,7 +144,7 @@ class BitAxeSystemInfo(models.Model):
 
 
 class BitAxePoolStats(models.Model):
-    """BitAxe mining pool statistics from CKPool."""
+    """Bitaxe mining pool statistics from CKPool."""
     pool_address = models.CharField(max_length=255, db_index=True, help_text="Bitcoin address or pool username")
     recorded_at = models.DateTimeField(default=timezone.now, db_index=True)
 
@@ -174,8 +174,8 @@ class BitAxePoolStats(models.Model):
             models.Index(fields=['pool_address', '-recorded_at']),
             models.Index(fields=['-recorded_at']),
         ]
-        verbose_name = "BitAxe Pool Statistics"
-        verbose_name_plural = "BitAxe Pool Statistics"
+        verbose_name = "Bitaxe Pool Statistics"
+        verbose_name_plural = "Bitaxe Pool Statistics"
 
     def __str__(self):
         return f"Pool Stats: {self.hashrate_1m} at {self.recorded_at}"

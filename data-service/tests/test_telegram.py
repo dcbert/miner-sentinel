@@ -38,11 +38,11 @@ def test_telegram_setup():
 
             # Test alert messages
             print("Testing alert message formats...")
-            notifier.send_hashrate_alert("bitaxe_1", "Test BitAxe", 450.5, 3)
-            notifier.send_best_difficulty_alert("bitaxe_1", "Test BitAxe", 25.6e6, 22.3e6)
-            notifier.send_device_offline_alert("bitaxe_1", "Test BitAxe", "2024-10-23 10:30:00", "Connection timeout")
-            notifier.send_device_online_alert("bitaxe_1", "Test BitAxe", "2h 15m 30s")
-            notifier.send_device_restart_notification("bitaxe_1", "Test BitAxe")
+            notifier.send_hashrate_alert("bitaxe_1", "Test Bitaxe", 450.5, 3)
+            notifier.send_best_difficulty_alert("bitaxe_1", "Test Bitaxe", 25.6e6, 22.3e6)
+            notifier.send_device_offline_alert("bitaxe_1", "Test Bitaxe", "2024-10-23 10:30:00", "Connection timeout")
+            notifier.send_device_online_alert("bitaxe_1", "Test Bitaxe", "2h 15m 30s")
+            notifier.send_device_restart_notification("bitaxe_1", "Test Bitaxe")
 
             print("✅ All tests completed successfully!")
             return True

@@ -172,7 +172,7 @@ export default function MiningDashboard() {
   const [latestStats, setLatestStats] = useState(null)
   const [statistics, setStatistics] = useState(null)
 
-  // BitAxe devices
+  // Bitaxe devices
   const [bitaxeDevices, setBitaxeDevices] = useState([])
   const [bitaxeDeviceMiningStats, setBitaxeDeviceMiningStats] = useState([])
   const [bitaxeDeviceHardwareStats, setBitaxeDeviceHardwareStats] = useState([])
@@ -195,7 +195,7 @@ export default function MiningDashboard() {
     try {
       setLoading(true)
 
-      // Fetch all data in parallel - both BitAxe and Avalon
+      // Fetch all data in parallel - both Bitaxe and Avalon
       const [
         poolRes, latestRes, statsRes,
         bitaxeDevicesRes, bitaxeMiningRes, bitaxeHardwareRes,
@@ -206,7 +206,7 @@ export default function MiningDashboard() {
         api.get('/api/bitaxe/pool/latest/').catch(() => ({ data: null })),
         api.get('/api/bitaxe/pool/statistics/?days=7').catch(() => ({ data: null })),
 
-        // BitAxe data
+        // Bitaxe data
         api.get('/api/bitaxe/devices/').catch(() => ({ data: { results: [] } })),
         api.get('/api/bitaxe/mining/latest/').catch(() => ({ data: [] })),
         api.get('/api/bitaxe/hardware/latest/').catch(() => ({ data: [] })),
@@ -222,7 +222,7 @@ export default function MiningDashboard() {
       setLatestStats(latestRes.data)
       setStatistics(statsRes.data)
 
-      // BitAxe data
+      // Bitaxe data
       setBitaxeDevices(bitaxeDevicesRes.data.results || bitaxeDevicesRes.data || [])
       setBitaxeDeviceMiningStats(bitaxeMiningRes.data || [])
       setBitaxeDeviceHardwareStats(bitaxeHardwareRes.data || [])
@@ -283,13 +283,13 @@ export default function MiningDashboard() {
   const formatHashrate = (hashrateValue, deviceType = null) => {
     if (!hashrateValue) return 'N/A'
 
-    // BitAxe reports in TH/s, Avalon reports in GH/s
+    // Bitaxe reports in TH/s, Avalon reports in GH/s
     if (deviceType === 'avalon') {
       // Avalon hashrate is in GH/s, convert to TH/s for display
       const ths = parseFloat(hashrateValue) / 1000
       return `${ths.toFixed(2)} TH/s`
     } else {
-      // BitAxe or unknown - assume TH/s format
+      // Bitaxe or unknown - assume TH/s format
       return typeof hashrateValue === 'string' ? hashrateValue : `${parseFloat(hashrateValue).toFixed(2)} TH/s`
     }
   }
@@ -299,7 +299,7 @@ export default function MiningDashboard() {
 
     const value = parseFloat(hashrateValue)
 
-    // Both BitAxe and Avalon report in GH/s for device tables
+    // Both Bitaxe and Avalon report in GH/s for device tables
     if (value >= 1000) {
       // Convert to TH/s if >= 1000 GH/s
       return `${(value / 1000).toFixed(2)} TH/s`
@@ -516,7 +516,7 @@ export default function MiningDashboard() {
           <MetricCard
             title="Active Devices"
             value={`${activeDevices}/${totalDevices}`}
-            subtitle={`${bitaxeDevices.length} BitAxe, ${avalonDevices.length} Avalon`}
+            subtitle={`${bitaxeDevices.length} Bitaxe, ${avalonDevices.length} Avalon`}
             icon={Monitor}
             iconColor="text-purple-500"
           />
@@ -581,7 +581,7 @@ export default function MiningDashboard() {
           </TabsTrigger>
           <TabsTrigger value="bitaxe" className="gap-1.5 sm:gap-2">
             <Cpu className="h-3.5 w-3.5 sm:h-4 sm:w-4 hidden sm:block" />
-            BitAxe
+            Bitaxe
           </TabsTrigger>
           <TabsTrigger value="avalon" className="gap-1.5 sm:gap-2">
             <Server className="h-3.5 w-3.5 sm:h-4 sm:w-4 hidden sm:block" />
@@ -753,7 +753,7 @@ export default function MiningDashboard() {
           </div>
         </TabsContent>
 
-        {/* BitAxe Devices Tab */}
+        {/* Bitaxe Devices Tab */}
         <TabsContent value="bitaxe" className="space-y-4">
           <Card>
             <CardHeader className="pb-3">
@@ -763,7 +763,7 @@ export default function MiningDashboard() {
                     <Cpu className="h-5 w-5 text-blue-500" />
                   </div>
                   <div>
-                    <CardTitle className="text-lg">BitAxe Devices</CardTitle>
+                    <CardTitle className="text-lg">Bitaxe Devices</CardTitle>
                     <CardDescription>{bitaxeDevices.length} device{bitaxeDevices.length !== 1 ? 's' : ''} registered</CardDescription>
                   </div>
                 </div>
@@ -831,7 +831,7 @@ export default function MiningDashboard() {
               ) : (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <Cpu className="h-12 w-12 text-muted-foreground/30 mb-4" />
-                  <p className="text-muted-foreground">No BitAxe devices found</p>
+                  <p className="text-muted-foreground">No Bitaxe devices found</p>
                   <p className="text-sm text-muted-foreground/70 mt-1">Devices will appear here once registered</p>
                 </div>
               )}

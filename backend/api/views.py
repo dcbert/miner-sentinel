@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 class BitAxeDeviceViewSet(viewsets.ModelViewSet):
     """
-    API endpoint for BitAxe devices with full CRUD operations.
+    API endpoint for Bitaxe devices with full CRUD operations.
     """
     queryset = BitAxeDevice.objects.all()
     serializer_class = BitAxeDeviceSerializer
@@ -63,7 +63,7 @@ class BitAxeDeviceViewSet(viewsets.ModelViewSet):
 
 class BitAxeMiningStatsViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    API endpoint for BitAxe mining statistics.
+    API endpoint for Bitaxe mining statistics.
     """
     queryset = BitAxeMiningStats.objects.all()
     serializer_class = BitAxeMiningStatsSerializer
@@ -112,7 +112,7 @@ class BitAxeMiningStatsViewSet(viewsets.ReadOnlyModelViewSet):
 
 class BitAxeHardwareLogViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    API endpoint for BitAxe hardware logs.
+    API endpoint for Bitaxe hardware logs.
     """
     queryset = BitAxeHardwareLog.objects.all()
     serializer_class = BitAxeHardwareLogSerializer
@@ -161,7 +161,7 @@ class BitAxeHardwareLogViewSet(viewsets.ReadOnlyModelViewSet):
 
 class BitAxeSystemInfoViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    API endpoint for BitAxe system information.
+    API endpoint for Bitaxe system information.
     """
     queryset = BitAxeSystemInfo.objects.all()
     serializer_class = BitAxeSystemInfoSerializer
@@ -211,7 +211,7 @@ class BitAxeSystemInfoViewSet(viewsets.ReadOnlyModelViewSet):
 
 class BitAxePoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    API endpoint for BitAxe pool statistics from CKPool.
+    API endpoint for Bitaxe pool statistics from CKPool.
     """
     queryset = BitAxePoolStats.objects.all()
     serializer_class = BitAxePoolStatsSerializer
@@ -302,7 +302,7 @@ class BitAxePoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
 def overview_analytics(request):
     """
     Advanced analytics endpoint for Overview Dashboard.
-    Aggregates data from both BitAxe and Avalon devices with comprehensive KPIs.
+    Aggregates data from both Bitaxe and Avalon devices with comprehensive KPIs.
     """
     hours = int(request.query_params.get('hours', 24))
     days = int(request.query_params.get('days', 7))
@@ -327,7 +327,7 @@ def overview_analytics(request):
     avalon_hardware_recent = AvalonHardwareLogs.objects.filter(recorded_at__gte=start_time_hours)
     avalon_hardware_period = AvalonHardwareLogs.objects.filter(recorded_at__gte=start_time_days)
 
-    # Pool Statistics (BitAxe only for now)
+    # Pool Statistics (Bitaxe only for now)
     pool_stats_recent = BitAxePoolStats.objects.filter(recorded_at__gte=start_time_hours).first()
     pool_stats_period = BitAxePoolStats.objects.filter(recorded_at__gte=start_time_days)
 
@@ -364,7 +364,7 @@ def overview_analytics(request):
     current_shares_accepted = 0
     current_shares_rejected = 0
 
-    # BitAxe devices (report in GH/s)
+    # Bitaxe devices (report in GH/s)
     for device in bitaxe_devices:
         latest_mining = BitAxeMiningStats.objects.filter(device=device).first()
         if latest_mining:
@@ -399,7 +399,7 @@ def overview_analytics(request):
     }
 
     # Period Mining Stats (aggregated over time for both device types)
-    # BitAxe aggregation
+    # Bitaxe aggregation
     bitaxe_mining_agg = bitaxe_mining_period.aggregate(
         avg_hashrate=Avg('hashrate_ghs'),
         max_hashrate=Max('hashrate_ghs'),
@@ -465,7 +465,7 @@ def overview_analytics(request):
     current_power_count = 0
     current_fan_speed_count = 0
 
-    # BitAxe hardware stats
+    # Bitaxe hardware stats
     for device in bitaxe_devices:
         latest_hardware = BitAxeHardwareLog.objects.filter(device=device).first()
         if latest_hardware:
@@ -502,7 +502,7 @@ def overview_analytics(request):
 
     # Period Hardware Stats (both device types) - using existing queries
 
-    # BitAxe hardware aggregation
+    # Bitaxe hardware aggregation
     bitaxe_hardware_agg = bitaxe_hardware_period.aggregate(
         avg_temp=Avg('temperature_c'),
         max_temp=Max('temperature_c'),
@@ -648,7 +648,7 @@ def overview_analytics(request):
     # Performance Trends (hourly averages for last 24h)
     from django.db.models.functions import TruncHour
 
-    # Combine BitAxe and Avalon mining trends
+    # Combine Bitaxe and Avalon mining trends
     bitaxe_hourly_mining = bitaxe_mining_recent.annotate(
         hour=TruncHour('recorded_at')
     ).values('hour').annotate(
@@ -663,7 +663,7 @@ def overview_analytics(request):
         total_shares=Sum('shares_accepted'),
     ).order_by('hour')
 
-    # Combine BitAxe and Avalon hardware trends
+    # Combine Bitaxe and Avalon hardware trends
     bitaxe_hourly_hardware = bitaxe_hardware_recent.annotate(
         hour=TruncHour('recorded_at')
     ).values('hour').annotate(
@@ -682,7 +682,7 @@ def overview_analytics(request):
     combined_hourly_mining = {}
     combined_hourly_hardware = {}
 
-    # Aggregate BitAxe hourly mining data
+    # Aggregate Bitaxe hourly mining data
     for item in bitaxe_hourly_mining:
         hour_key = item['hour'].isoformat()
         combined_hourly_mining[hour_key] = {
@@ -704,7 +704,7 @@ def overview_analytics(request):
                 'shares': item['total_shares'] or 0,
             }
 
-    # Aggregate BitAxe hourly hardware data
+    # Aggregate Bitaxe hourly hardware data
     for item in bitaxe_hourly_hardware:
         hour_key = item['hour'].isoformat()
         combined_hourly_hardware[hour_key] = {
@@ -768,7 +768,7 @@ def overview_analytics(request):
             'hashrate_ghs': combined_hourly_mining[hour_key].get('hashrate_ghs', 0),
         }
 
-    # Add BitAxe best shares
+    # Add Bitaxe best shares
     for item in bitaxe_hourly_best_shares:
         hour_key = item['hour'].isoformat()
         if hour_key in combined_hourly_best_shares:
@@ -1041,7 +1041,7 @@ def detailed_analytics(request):
             current_power_total += power
             device_power_data.append({
                 'device_name': device.device_name,
-                'device_type': 'BitAxe',
+                'device_type': 'Bitaxe',
                 'power_watts': round(power, 1),
                 'hashrate_ghs': round(hashrate, 2),
                 'efficiency_w_per_gh': round(power / hashrate, 2) if hashrate > 0 else 0,
@@ -1124,7 +1124,7 @@ def detailed_analytics(request):
         difficulty__gt=1000
     ).order_by('-difficulty')[:100]
 
-    # All-time best share - check BOTH BitAxe and Avalon devices
+    # All-time best share - check BOTH Bitaxe and Avalon devices
     bitaxe_best = bitaxe_best_shares.first()
     avalon_best = avalon_best_shares.first()
 
@@ -1135,7 +1135,7 @@ def detailed_analytics(request):
     if bitaxe_best_diff >= avalon_best_diff:
         all_time_best = bitaxe_best
         all_time_best_difficulty = bitaxe_best_diff
-        all_time_best_source = 'BitAxe'
+        all_time_best_source = 'Bitaxe'
     else:
         all_time_best = avalon_best
         all_time_best_difficulty = avalon_best_diff
@@ -1243,7 +1243,7 @@ def detailed_analytics(request):
             'date': day_key,
             'best_difficulty': item['max_difficulty'],
             'device_name': item['device_name'],
-            'device_type': 'BitAxe',
+            'device_type': 'Bitaxe',
         }
     for item in recent_avalon_bests:
         day_key = item['day'].isoformat()
@@ -1299,7 +1299,7 @@ def detailed_analytics(request):
     from django.db.models import F, Window
     from django.db.models.functions import RowNumber
 
-    # For BitAxe: Get unique (device, best_difficulty) combinations with earliest timestamp
+    # For Bitaxe: Get unique (device, best_difficulty) combinations with earliest timestamp
     bitaxe_unique_bests = BitAxeMiningStats.objects.filter(
         best_difficulty__isnull=False,
         best_difficulty__gt=0
@@ -1329,7 +1329,7 @@ def detailed_analytics(request):
                 'difficulty': diff,
                 'difficulty_formatted': _format_difficulty(diff),
                 'device_name': share['device__device_name'],
-                'device_type': 'BitAxe',
+                'device_type': 'Bitaxe',
                 'timestamp': share['first_timestamp'].isoformat() if share['first_timestamp'] else None,
                 'hashrate_at_time': round(share['hashrate'] or 0, 2),
             })
@@ -1443,7 +1443,7 @@ def detailed_analytics(request):
         if latest_mining and latest_hw:
             device_stats.append({
                 'device_name': device.device_name,
-                'device_type': 'BitAxe',
+                'device_type': 'Bitaxe',
                 'hashrate_ghs': round(latest_mining.hashrate_ghs or 0, 2),
                 'power_watts': round(latest_hw.power_watts or 0, 1),
                 'temperature_c': round(latest_hw.temperature_c or 0, 1),

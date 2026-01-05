@@ -156,10 +156,10 @@ export default function SettingsPage() {
 
       if (dialogMode === 'add') {
         await api.post(`${endpoint}/`, formData)
-        setSuccess(`${dialogDeviceType === 'bitaxe' ? 'BitAxe' : 'Avalon'} device added successfully`)
+        setSuccess(`${dialogDeviceType === 'bitaxe' ? 'Bitaxe' : 'Avalon'} device added successfully`)
       } else {
         await api.put(`${endpoint}/${currentDevice.device_id}/`, formData)
-        setSuccess(`${dialogDeviceType === 'bitaxe' ? 'BitAxe' : 'Avalon'} device updated successfully`)
+        setSuccess(`${dialogDeviceType === 'bitaxe' ? 'Bitaxe' : 'Avalon'} device updated successfully`)
       }
 
       setDialogOpen(false)
@@ -184,7 +184,7 @@ export default function SettingsPage() {
       const endpoint = deviceToDelete.deviceType === 'bitaxe' ? '/api/bitaxe/devices' : '/api/avalon/devices'
       await api.delete(`${endpoint}/${deviceToDelete.device_id}/`)
 
-      setSuccess(`${deviceToDelete.deviceType === 'bitaxe' ? 'BitAxe' : 'Avalon'} device deleted successfully`)
+      setSuccess(`${deviceToDelete.deviceType === 'bitaxe' ? 'Bitaxe' : 'Avalon'} device deleted successfully`)
       setDeleteDialogOpen(false)
       setDeviceToDelete(null)
       fetchData()
@@ -255,7 +255,7 @@ export default function SettingsPage() {
           {devices.length === 0 ? (
             <TableRow>
               <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                No {deviceType === 'bitaxe' ? 'BitAxe' : 'Avalon'} devices configured.
+                No {deviceType === 'bitaxe' ? 'Bitaxe' : 'Avalon'} devices configured.
                 Click "Add Device" to get started.
               </TableCell>
             </TableRow>
@@ -382,16 +382,16 @@ export default function SettingsPage() {
 
         {/* Devices Tab */}
         <TabsContent value="devices" className="space-y-4 sm:space-y-6">
-          {/* BitAxe Devices */}
+          {/* Bitaxe Devices */}
           <Card>
             <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
                   <Cpu className="h-4 w-4 sm:h-5 sm:w-5" />
-                  BitAxe Devices
+                  Bitaxe Devices
                 </CardTitle>
                 <CardDescription className="text-xs sm:text-sm">
-                  Manage your BitAxe mining devices
+                  Manage your Bitaxe mining devices
                 </CardDescription>
               </div>
               <Button onClick={() => openAddDialog('bitaxe')} className="w-full sm:w-auto">
@@ -456,7 +456,7 @@ export default function SettingsPage() {
                 )}
                 <div className="flex items-center gap-2 text-muted-foreground text-xs sm:text-sm">
                   <Cpu className="w-4 h-4" />
-                  {bitaxeDevices.length} BitAxe, {avalonDevices.length} Avalon devices
+                  {bitaxeDevices.length} Bitaxe, {avalonDevices.length} Avalon devices
                 </div>
               </div>
 
@@ -750,7 +750,7 @@ export default function SettingsPage() {
         <DialogContent onClose={() => setDialogOpen(false)}>
           <DialogHeader>
             <DialogTitle>
-              {dialogMode === 'add' ? 'Add' : 'Edit'} {dialogDeviceType === 'bitaxe' ? 'BitAxe' : 'Avalon'} Device
+              {dialogMode === 'add' ? 'Add' : 'Edit'} {dialogDeviceType === 'bitaxe' ? 'Bitaxe' : 'Avalon'} Device
             </DialogTitle>
             <DialogDescription>
               {dialogMode === 'add'

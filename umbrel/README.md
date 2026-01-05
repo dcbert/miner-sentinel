@@ -104,7 +104,7 @@ image: dcbert/minersentinel-backend:v1.0.0@sha256:<digest>
      docker exec -it minersentinel_backend_1 python manage.py createsuperuser
      ```
 3. Login to Django admin at `http://umbrel.local:3080/admin/` to:
-   - Add BitAxe and Avalon devices
+   - Add Bitaxe and Avalon devices
    - Configure pool settings
    - Set up Telegram notifications
 

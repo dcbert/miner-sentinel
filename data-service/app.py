@@ -1,6 +1,6 @@
 """
 Data Collection Service for MinerSentinel Dashboard
-Polls BitAxe and Avalon devices and CKPool/PublicPool periodically and stores data in Postgres.
+Polls Bitaxe and Avalon devices and CKPool/PublicPool periodically and stores data in Postgres.
 Settings are loaded from the database (collector_settings table).
 """
 
@@ -101,7 +101,7 @@ def load_active_devices():
         conn = psycopg2.connect(DATABASE_URL)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        # Load BitAxe devices
+        # Load Bitaxe devices
         cursor.execute("""
             SELECT device_id, device_name, ip_address
             FROM bitaxe_devices
@@ -109,7 +109,7 @@ def load_active_devices():
         """)
         bitaxe_devices = cursor.fetchall()
         bitaxe_collector.update_devices(bitaxe_devices)
-        logger.info(f"Loaded {len(bitaxe_devices)} active BitAxe devices")
+        logger.info(f"Loaded {len(bitaxe_devices)} active Bitaxe devices")
 
         # Load Avalon devices
         cursor.execute("""
@@ -141,12 +141,12 @@ def poll_all_sources():
     load_active_devices()
 
     try:
-        # Poll BitAxe devices
-        logger.info("Polling BitAxe devices...")
+        # Poll Bitaxe devices
+        logger.info("Polling Bitaxe devices...")
         bitaxe_collector.collect_all_devices()
-        logger.info("BitAxe polling completed")
+        logger.info("Bitaxe polling completed")
     except Exception as e:
-        logger.error(f"Error polling BitAxe devices: {e}", exc_info=True)
+        logger.error(f"Error polling Bitaxe devices: {e}", exc_info=True)
 
     try:
         # Poll Avalon devices
@@ -368,7 +368,7 @@ if __name__ == '__main__':
     # Load active devices from database
     logger.info("Loading active devices from database...")
     bitaxe_devices, avalon_devices = load_active_devices()
-    logger.info(f"Found {len(bitaxe_devices)} BitAxe and {len(avalon_devices)} Avalon devices")
+    logger.info(f"Found {len(bitaxe_devices)} Bitaxe and {len(avalon_devices)} Avalon devices")
 
     # Run initial poll
     logger.info("Running initial data collection...")

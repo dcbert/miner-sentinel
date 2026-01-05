@@ -1,5 +1,5 @@
 """
-CKPool data collector for BitAxe mining pool statistics.
+CKPool data collector for Bitaxe mining pool statistics.
 Fetches data from CKPool API and stores it in the database.
 """
 import logging

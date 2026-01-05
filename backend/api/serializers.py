@@ -10,7 +10,7 @@ class BitAxeDeviceSerializer(serializers.ModelSerializer):
 
 
 class BitAxeDeviceWriteSerializer(serializers.ModelSerializer):
-    """Serializer for creating/updating BitAxe devices."""
+    """Serializer for creating/updating Bitaxe devices."""
     class Meta:
         model = BitAxeDevice
         fields = ['device_id', 'device_name', 'ip_address', 'is_active']

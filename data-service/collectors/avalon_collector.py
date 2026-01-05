@@ -457,21 +457,13 @@ class AvalonCollector:
             conn = self.get_db_connection()
             cursor = conn.cursor()
 
-            # Auto-register device if not exists
-            # Note: We only set device_name for NEW devices (using product name as default)
-            # Existing devices keep their user-set device_name
-            default_device_name = version_info.get('PROD', device_id)
+            # Get device name from database
             cursor.execute("""
-                INSERT INTO avalon_devices (device_id, device_name, ip_address, is_active, created_at)
-                VALUES (%s, %s, %s, NOW())
-                ON CONFLICT (device_id) DO UPDATE SET
-                    ip_address = EXCLUDED.ip_address
-                RETURNING id
-            """, (device_id, default_device_name, device_ip))
-
+                SELECT id, device_name FROM avalon_devices WHERE device_id = %s
+            """, (device_id,))
             device_row = cursor.fetchone()
-            device_db_id = device_row[0]
-            conn.commit()
+            device_db_id = device_row[0] if device_row else None
+            device_name = device_row[1] if device_row else device_id
 
             # Use timezone-aware datetime
             from datetime import datetime, timezone

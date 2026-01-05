@@ -97,8 +97,8 @@ export const getBestSharesChartData = (trends) => {
         hour: hour.toISOString(),
         best_share_difficulty: difficulty,
         hashrate_ghs: baseHashrate + Math.random() * 20,
-        device_name: isAvalon ? 'Avalon Nano 3' : `BitAxe ${Math.floor(Math.random() * 3) + 1}`,
-        device_type: isAvalon ? 'Avalon' : 'BitAxe'
+        device_name: isAvalon ? 'Avalon Nano 3' : `Bitaxe ${Math.floor(Math.random() * 3) + 1}`,
+        device_type: isAvalon ? 'Avalon' : 'Bitaxe'
       })
     } else {
       // Hour with mining but no new best share

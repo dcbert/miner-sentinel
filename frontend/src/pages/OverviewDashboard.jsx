@@ -149,7 +149,7 @@ function DeviceStatusCard({ bitaxeCount, avalonCount, totalActive }) {
           <div className="flex-1 space-y-1">
             {bitaxeCount > 0 && (
               <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-xs">BitAxe</Badge>
+                <Badge variant="secondary" className="text-xs">Bitaxe</Badge>
                 <span className="text-sm font-medium">{bitaxeCount}</span>
               </div>
             )}
@@ -370,7 +370,7 @@ export default function OverviewDashboard() {
                   <div className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 rounded-full bg-blue-500" />
-                      <span>BitAxe</span>
+                      <span>Bitaxe</span>
                     </div>
                     <span className="font-medium">{analytics.overview?.bitaxe_devices}</span>
                   </div>

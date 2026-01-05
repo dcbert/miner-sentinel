@@ -5,7 +5,7 @@ from . import avalon_views, views
 
 router = DefaultRouter()
 
-# BitAxe endpoints
+# Bitaxe endpoints
 router.register(r'bitaxe/devices', views.BitAxeDeviceViewSet, basename='bitaxe-devices')
 router.register(r'bitaxe/mining', views.BitAxeMiningStatsViewSet, basename='bitaxe-mining')
 router.register(r'bitaxe/hardware', views.BitAxeHardwareLogViewSet, basename='bitaxe-hardware')

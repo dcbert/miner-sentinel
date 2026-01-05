@@ -65,7 +65,7 @@ export default function BestSharesChart({ data, formatAxisDifficulty, formatAxis
                 <div className="space-y-2">
                   {bitaxeBestShare && bitaxeBestShare > 0 && (
                     <div className="flex flex-col">
-                      <span className="text-[0.70rem] uppercase text-muted-foreground">BitAxe Best Share</span>
+                      <span className="text-[0.70rem] uppercase text-muted-foreground">Bitaxe Best Share</span>
                       <span className="font-bold text-chart-4 text-lg">
                         {bitaxeBestShare >= 1000000 ?
                           `${(bitaxeBestShare / 1000000).toFixed(1)}M` :
@@ -75,7 +75,7 @@ export default function BestSharesChart({ data, formatAxisDifficulty, formatAxis
                       {bitaxeDeviceName && (
                         <div className="flex items-center gap-1 mt-1">
                           <span className="text-[0.65rem] text-muted-foreground">
-                            BitAxe • {bitaxeDeviceName}
+                            Bitaxe • {bitaxeDeviceName}
                           </span>
                         </div>
                       )}
@@ -123,7 +123,7 @@ export default function BestSharesChart({ data, formatAxisDifficulty, formatAxis
           <div className="flex justify-center gap-4 mt-4">
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-chart-4"></div>
-              <span className="text-xs text-muted-foreground">BitAxe Best Shares</span>
+              <span className="text-xs text-muted-foreground">Bitaxe Best Shares</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-chart-2"></div>

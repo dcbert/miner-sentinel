@@ -48,7 +48,7 @@ export default function BitAxeDashboard() {
       setDeviceMiningStats(miningRes.data || [])
       setDeviceHardwareStats(hardwareRes.data || [])
     } catch (error) {
-      console.error('Error fetching BitAxe data:', error)
+      console.error('Error fetching Bitaxe data:', error)
     } finally {
       setLoading(false)
     }
@@ -106,7 +106,7 @@ export default function BitAxeDashboard() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold">BitAxe Dashboard</h1>
+          <h1 className="text-3xl font-bold">Bitaxe Dashboard</h1>
           <p className="text-muted-foreground">Mining pool statistics and performance monitoring</p>
         </div>
         {latestStats && (
@@ -718,7 +718,7 @@ export default function BitAxeDashboard() {
                               (or <strong>{formatLargeNumber(1 / probabilityPerBlock)}</strong> attempts needed on average).
                             </p>
                             <p className="text-sm text-muted-foreground">
-                              Solo mining with ASICs like BitAxe is primarily done for:
+                              Solo mining with ASICs like Bitaxe is primarily done for:
                             </p>
                             <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1 ml-2">
                               <li><strong>Supporting the network:</strong> Contributing to Bitcoin's decentralization</li>
