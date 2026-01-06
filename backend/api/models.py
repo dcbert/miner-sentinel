@@ -343,14 +343,6 @@ class CollectorSettings(models.Model):
         ('publicpool', 'Public Pool'),
     ]
 
-    # Currency choices
-    CURRENCY_CHOICES = [
-        ('USD', 'US Dollar ($)'),
-        ('EUR', 'Euro (€)'),
-        ('GBP', 'British Pound (£)'),
-        ('CHF', 'Swiss Franc (CHF)'),
-    ]
-
     # Polling configuration
     polling_interval_minutes = models.IntegerField(
         default=15,
