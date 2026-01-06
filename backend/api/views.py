@@ -1220,10 +1220,12 @@ def detailed_analytics(request):
     thirty_days_ago = timezone.now() - timedelta(days=30)
     recent_bitaxe_bests = BitAxeMiningStats.objects.filter(
         recorded_at__gte=thirty_days_ago,
-        best_difficulty__isnull=False,
-        best_difficulty__gt=0
+    ).filter(
+        Q(best_difficulty__isnull=False, best_difficulty__gt=0) |
+        Q(best_session_difficulty__isnull=False, best_session_difficulty__gt=0)
     ).annotate(day=TruncDay('recorded_at')).values('day').annotate(
-        max_difficulty=Max('best_difficulty'),
+        max_best_ever=Max('best_difficulty'),           # All-time best
+        max_best_session=Max('best_session_difficulty'), # Session best
         device_name=Max('device__device_name'),
     ).order_by('day')
 
@@ -1241,30 +1243,29 @@ def detailed_analytics(request):
         day_key = item['day'].isoformat()
         daily_bests[day_key] = {
             'date': day_key,
-            'best_difficulty': item['max_difficulty'],
+            'best_difficulty': item['max_best_ever'] or 0,
+            'best_session_difficulty': item['max_best_session'] or 0,
             'device_name': item['device_name'],
             'device_type': 'Bitaxe',
         }
     for item in recent_avalon_bests:
         day_key = item['day'].isoformat()
+        # Avalon doesn't have session tracking, so use difficulty for both
         if day_key not in daily_bests or item['max_difficulty'] > daily_bests[day_key]['best_difficulty']:
             daily_bests[day_key] = {
                 'date': day_key,
                 'best_difficulty': item['max_difficulty'],
+                'best_session_difficulty': item['max_difficulty'],  # Same as best for Avalon
                 'device_name': item['device_name'],
                 'device_type': 'Avalon',
             }
+        elif day_key in daily_bests:
+            # Keep existing best_difficulty but update session if Avalon has higher
+            if item['max_difficulty'] > daily_bests[day_key].get('best_session_difficulty', 0):
+                daily_bests[day_key]['best_session_difficulty'] = item['max_difficulty']
 
-    # Running maximum calculation for progress tracking
+    # Sort daily bests by date
     sorted_daily_bests = sorted(daily_bests.values(), key=lambda x: x['date'])
-    running_max = 0
-    for item in sorted_daily_bests:
-        if item['best_difficulty'] > running_max:
-            running_max = item['best_difficulty']
-            item['is_new_record'] = True
-        else:
-            item['is_new_record'] = False
-        item['running_max'] = running_max
 
     result['best_difficulty_prediction'] = {
         'current_hashrate_ghs': round(total_hashrate_ghs, 2),
