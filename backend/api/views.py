@@ -961,6 +961,107 @@ def collector_settings_view(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+def refresh_network_data(request):
+    """
+    Fetch and cache latest Bitcoin price and network hashrate from public APIs.
+    """
+    import requests
+    from django.utils import timezone as tz
+
+    try:
+        settings = CollectorSettings.get_settings()
+
+        btc_price = None
+        network_hashrate = None
+        network_difficulty = None
+        errors = []
+
+        # Fetch BTC price from CoinGecko (free, no API key required)
+        try:
+            price_response = requests.get(
+                'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd',
+                timeout=10
+            )
+            if price_response.ok:
+                price_data = price_response.json()
+                btc_price = price_data.get('bitcoin', {}).get('usd')
+                if btc_price:
+                    settings.cached_btc_price = btc_price
+                    logger.info(f"Updated BTC price: ${btc_price}")
+        except Exception as e:
+            errors.append(f"Failed to fetch BTC price: {str(e)}")
+            logger.warning(f"Failed to fetch BTC price: {e}")
+
+        # Fetch network stats from mempool.space (free, no API key required)
+        try:
+            hashrate_response = requests.get(
+                'https://mempool.space/api/v1/mining/hashrate/3d',
+                timeout=10
+            )
+            if hashrate_response.ok:
+                hashrate_data = hashrate_response.json()
+                # Get latest hashrate (in H/s), convert to EH/s
+                if hashrate_data.get('currentHashrate'):
+                    network_hashrate = hashrate_data['currentHashrate'] / 1e18  # Convert to EH/s
+                    settings.cached_network_hashrate = network_hashrate
+                    logger.info(f"Updated network hashrate: {network_hashrate:.2f} EH/s")
+                if hashrate_data.get('currentDifficulty'):
+                    network_difficulty = hashrate_data['currentDifficulty']
+                    settings.cached_network_difficulty = network_difficulty
+                    logger.info(f"Updated network difficulty: {network_difficulty}")
+        except Exception as e:
+            errors.append(f"Failed to fetch network hashrate: {str(e)}")
+            logger.warning(f"Failed to fetch network hashrate: {e}")
+
+        # Update timestamp
+        settings.network_data_updated_at = tz.now()
+        settings.save()
+
+        return Response({
+            'success': True,
+            'message': 'Network data refreshed',
+            'data': {
+                'btc_price': float(settings.cached_btc_price),
+                'network_hashrate_ehs': float(settings.cached_network_hashrate),
+                'network_difficulty': float(settings.cached_network_difficulty),
+                'updated_at': settings.network_data_updated_at.isoformat() if settings.network_data_updated_at else None,
+            },
+            'errors': errors if errors else None,
+        })
+
+    except Exception as e:
+        logger.error(f"Error refreshing network data: {e}")
+        return Response({
+            'success': False,
+            'error': str(e),
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_network_data(request):
+    """
+    Get cached network data (BTC price, hashrate, difficulty).
+    """
+    try:
+        settings = CollectorSettings.get_settings()
+
+        return Response({
+            'btc_price': float(settings.cached_btc_price),
+            'network_hashrate_ehs': float(settings.cached_network_hashrate),
+            'network_difficulty': float(settings.cached_network_difficulty),
+            'updated_at': settings.network_data_updated_at.isoformat() if settings.network_data_updated_at else None,
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting network data: {e}")
+        return Response({
+            'error': str(e),
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def trigger_collector_poll(request):
     """
     Trigger a manual data collection poll.
@@ -1358,9 +1459,17 @@ def detailed_analytics(request):
     }
 
     # === COST ANALYSIS ===
-    # Configurable energy costs
-    kwh_price = float(request.query_params.get('kwh_price', 0.12))
-    btc_price = float(request.query_params.get('btc_price', 67000))
+    # Get settings from database
+    settings = CollectorSettings.get_settings()
+
+    # Use settings for energy costs and network data
+    kwh_price = float(settings.energy_rate)
+    energy_currency = settings.energy_currency
+    show_revenue = settings.show_revenue_stats
+    btc_price = float(settings.cached_btc_price)
+    network_hashrate_ehs = float(settings.cached_network_hashrate)
+    network_difficulty = float(settings.cached_network_difficulty)
+    network_data_updated = settings.network_data_updated_at
 
     # Daily/monthly energy calculations
     power_kw = current_power_total / 1000
@@ -1372,21 +1481,35 @@ def detailed_analytics(request):
     monthly_cost = monthly_kwh * kwh_price
     yearly_cost = yearly_kwh * kwh_price
 
-    # Mining revenue estimation
-    network_hashrate_ehs = 650  # EH/s
+    # Mining revenue estimation (only if enabled)
     btc_per_block = 3.125
     blocks_per_day = 144
 
-    network_hashrate_ghs = network_hashrate_ehs * 1e9
-    daily_btc = (total_hashrate_ghs / network_hashrate_ghs) * blocks_per_day * btc_per_block if network_hashrate_ghs > 0 else 0
-    monthly_btc = daily_btc * 30
-    yearly_btc = daily_btc * 365
+    if show_revenue and network_hashrate_ehs > 0:
+        network_hashrate_ghs = network_hashrate_ehs * 1e9
+        daily_btc = (total_hashrate_ghs / network_hashrate_ghs) * blocks_per_day * btc_per_block
+        monthly_btc = daily_btc * 30
+        yearly_btc = daily_btc * 365
 
-    daily_revenue = daily_btc * btc_price
-    monthly_revenue = monthly_btc * btc_price
-    yearly_revenue = yearly_btc * btc_price
+        daily_revenue = daily_btc * btc_price
+        monthly_revenue = monthly_btc * btc_price
+        yearly_revenue = yearly_btc * btc_price
+    else:
+        daily_btc = monthly_btc = yearly_btc = 0
+        daily_revenue = monthly_revenue = yearly_revenue = 0
 
     result['cost_analysis'] = {
+        'settings': {
+            'energy_rate': kwh_price,
+            'energy_currency': energy_currency,
+            'show_revenue_stats': show_revenue,
+        },
+        'network_data': {
+            'btc_price': btc_price,
+            'network_hashrate_ehs': network_hashrate_ehs,
+            'network_difficulty': network_difficulty,
+            'updated_at': network_data_updated.isoformat() if network_data_updated else None,
+        },
         'energy_consumption': {
             'current_power_watts': round(current_power_total, 1),
             'current_power_kw': round(power_kw, 3),
@@ -1396,37 +1519,41 @@ def detailed_analytics(request):
         },
         'energy_costs': {
             'kwh_price': kwh_price,
-            'daily_cost_usd': round(daily_cost, 2),
-            'monthly_cost_usd': round(monthly_cost, 2),
-            'yearly_cost_usd': round(yearly_cost, 2),
+            'currency': energy_currency,
+            'daily_cost': round(daily_cost, 2),
+            'monthly_cost': round(monthly_cost, 2),
+            'yearly_cost': round(yearly_cost, 2),
         },
-        'mining_revenue': {
+    }
+
+    # Only include revenue stats if enabled
+    if show_revenue:
+        result['cost_analysis']['mining_revenue'] = {
             'btc_price': btc_price,
             'daily_btc': f"{daily_btc:.10f}",
             'monthly_btc': f"{monthly_btc:.10f}",
             'yearly_btc': f"{yearly_btc:.10f}",
-            'daily_revenue_usd': round(daily_revenue, 4),
-            'monthly_revenue_usd': round(monthly_revenue, 4),
-            'yearly_revenue_usd': round(yearly_revenue, 4),
-        },
-        'profitability': {
-            'daily_profit_usd': round(daily_revenue - daily_cost, 4),
-            'monthly_profit_usd': round(monthly_revenue - monthly_cost, 4),
-            'yearly_profit_usd': round(yearly_revenue - yearly_cost, 4),
+            'daily_revenue': round(daily_revenue, 4),
+            'monthly_revenue': round(monthly_revenue, 4),
+            'yearly_revenue': round(yearly_revenue, 4),
+        }
+        result['cost_analysis']['profitability'] = {
+            'daily_profit': round(daily_revenue - daily_cost, 4),
+            'monthly_profit': round(monthly_revenue - monthly_cost, 4),
+            'yearly_profit': round(yearly_revenue - yearly_cost, 4),
             'is_profitable': daily_revenue > daily_cost,
             'break_even_btc_price': round(daily_cost / daily_btc, 2) if daily_btc > 0 else None,
-        },
-        'efficiency_metrics': {
+        }
+        result['cost_analysis']['efficiency_metrics'] = {
             'cost_per_gh_per_day': round(daily_cost / total_hashrate_ghs, 4) if total_hashrate_ghs > 0 else 0,
             'btc_per_kwh': f"{daily_btc / daily_kwh:.12f}" if daily_kwh > 0 else "0",
             'sats_per_kwh': round((daily_btc * 100000000) / daily_kwh, 4) if daily_kwh > 0 else 0,
-        },
-        'assumptions': {
+        }
+        result['cost_analysis']['assumptions'] = {
             'network_hashrate_ehs': network_hashrate_ehs,
             'btc_per_block': btc_per_block,
             'blocks_per_day': blocks_per_day,
-        },
-    }
+        }
 
     # === DEVICE COMPARISON ===
     device_stats = []

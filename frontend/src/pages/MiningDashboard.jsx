@@ -453,6 +453,7 @@ export default function MiningDashboard() {
   const avgTemp = allHardwareStats.length > 0
     ? allHardwareStats.reduce((sum, s) => sum + (s.temperature_c || 0), 0) / allHardwareStats.length
     : 0
+  const maxBestDifficulty = allMiningStats.reduce((max, s) => Math.max(max, s.best_difficulty || 0), 0)
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -529,8 +530,8 @@ export default function MiningDashboard() {
           />
           <MetricCard
             title="Best Share"
-            value={latestStats?.bestshare ? formatNumber(latestStats.bestshare) : '0'}
-            subtitle="All-time difficulty"
+            value={maxBestDifficulty ? formatNumber(maxBestDifficulty) : '0'}
+            subtitle="Device best difficulty"
             icon={Trophy}
             iconColor="text-orange-500"
           />

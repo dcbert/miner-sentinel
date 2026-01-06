@@ -292,11 +292,21 @@ function EnergyAnalysisCard({ energy }) {
 
 // Cost Analysis Card
 function CostAnalysisCard({ cost }) {
-  const profitability = cost?.profitability || {}
+  const settings = cost?.settings || {}
+  const networkData = cost?.network_data || {}
+  const energyConsumption = cost?.energy_consumption || {}
   const energyCosts = cost?.energy_costs || {}
+  const profitability = cost?.profitability || {}
   const revenue = cost?.mining_revenue || {}
 
+  const showRevenue = settings.show_revenue_stats !== false
   const isProfit = profitability.is_profitable
+  const currencySymbol = { USD: '$', EUR: '€', GBP: '£', CHF: 'CHF ' }[settings.energy_currency] || '$'
+
+  const formatWithCurrency = (value, decimals = 2) => {
+    if (value == null) return `${currencySymbol}0`
+    return `${currencySymbol}${Number(value).toFixed(decimals)}`
+  }
 
   return (
     <Card>
@@ -305,63 +315,118 @@ function CostAnalysisCard({ cost }) {
           <DollarSign className="h-4 w-4 sm:h-5 sm:w-5 text-green-500" />
           Cost Analysis
         </CardTitle>
-        <CardDescription className="text-xs sm:text-sm">Energy costs vs mining revenue</CardDescription>
+        <CardDescription className="text-xs sm:text-sm">
+          {showRevenue ? 'Energy costs vs mining revenue' : 'Energy costs overview'}
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 sm:space-y-4">
-        {/* Daily Summary */}
-        <div className={`p-3 sm:p-4 rounded-lg ${isProfit ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs sm:text-sm text-muted-foreground">Daily Net</p>
-              <p className={`text-lg sm:text-2xl font-bold ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
-                {formatCurrency(profitability.daily_profit_usd, 4)}
-              </p>
+        {/* Daily Summary - Only show if revenue stats enabled */}
+        {showRevenue && (
+          <div className={`p-3 sm:p-4 rounded-lg ${isProfit ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs sm:text-sm text-muted-foreground">Daily Net</p>
+                <p className={`text-lg sm:text-2xl font-bold ${isProfit ? 'text-green-500' : 'text-red-500'}`}>
+                  {formatWithCurrency(profitability.daily_profit, 4)}
+                </p>
+              </div>
+              <Badge variant={isProfit ? 'default' : 'destructive'} className="text-xs">
+                {isProfit ? 'Profitable' : 'Loss'}
+              </Badge>
             </div>
-            <Badge variant={isProfit ? 'default' : 'destructive'} className="text-xs">
-              {isProfit ? 'Profitable' : 'Loss'}
-            </Badge>
+          </div>
+        )}
+
+        {/* Energy Consumption Stats */}
+        <div className="grid gap-3 sm:gap-4 grid-cols-2">
+          <div className="p-2 sm:p-3 rounded-lg border">
+            <p className="text-[10px] sm:text-xs text-muted-foreground">Current Power</p>
+            <p className="text-base sm:text-lg font-semibold">
+              {energyConsumption.current_power_watts?.toFixed(0) || 0}W
+            </p>
+          </div>
+          <div className="p-2 sm:p-3 rounded-lg border">
+            <p className="text-[10px] sm:text-xs text-muted-foreground">Daily kWh</p>
+            <p className="text-base sm:text-lg font-semibold">
+              {energyConsumption.daily_kwh?.toFixed(2) || 0} kWh
+            </p>
           </div>
         </div>
 
-        {/* Breakdown */}
+        {/* Cost Breakdown */}
         <div className="grid gap-3 sm:gap-4 grid-cols-2">
           <div className="p-2 sm:p-3 rounded-lg border">
             <p className="text-[10px] sm:text-xs text-muted-foreground">Daily Energy Cost</p>
             <p className="text-base sm:text-lg font-semibold text-red-400">
-              -{formatCurrency(energyCosts.daily_cost_usd)}
+              -{formatWithCurrency(energyCosts.daily_cost)}
             </p>
           </div>
-          <div className="p-2 sm:p-3 rounded-lg border">
-            <p className="text-[10px] sm:text-xs text-muted-foreground">Daily Revenue</p>
-            <p className="text-base sm:text-lg font-semibold text-green-400">
-              +{formatCurrency(revenue.daily_revenue_usd, 4)}
-            </p>
-          </div>
+          {showRevenue ? (
+            <div className="p-2 sm:p-3 rounded-lg border">
+              <p className="text-[10px] sm:text-xs text-muted-foreground">Daily Revenue</p>
+              <p className="text-base sm:text-lg font-semibold text-green-400">
+                +{formatWithCurrency(revenue.daily_revenue, 4)}
+              </p>
+            </div>
+          ) : (
+            <div className="p-2 sm:p-3 rounded-lg border">
+              <p className="text-[10px] sm:text-xs text-muted-foreground">Energy Rate</p>
+              <p className="text-base sm:text-lg font-semibold">
+                {formatWithCurrency(settings.energy_rate, 2)}/kWh
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Monthly Projections */}
         <div className="space-y-1.5 sm:space-y-2 pt-2 border-t">
           <div className="flex justify-between text-xs sm:text-sm">
             <span className="text-muted-foreground">Monthly Energy Cost</span>
-            <span>{formatCurrency(energyCosts.monthly_cost_usd)}</span>
+            <span>{formatWithCurrency(energyCosts.monthly_cost)}</span>
           </div>
+          {showRevenue && (
+            <>
+              <div className="flex justify-between text-xs sm:text-sm">
+                <span className="text-muted-foreground">Monthly Revenue</span>
+                <span>{formatWithCurrency(revenue.monthly_revenue, 4)}</span>
+              </div>
+              <div className="flex justify-between text-xs sm:text-sm font-medium pt-2 border-t">
+                <span>Monthly Profit</span>
+                <span className={(profitability.monthly_profit || 0) >= 0 ? 'text-green-500' : 'text-red-500'}>
+                  {formatWithCurrency(profitability.monthly_profit, 4)}
+                </span>
+              </div>
+            </>
+          )}
           <div className="flex justify-between text-xs sm:text-sm">
-            <span className="text-muted-foreground">Monthly Revenue</span>
-            <span>{formatCurrency(revenue.monthly_revenue_usd, 4)}</span>
-          </div>
-          <div className="flex justify-between text-xs sm:text-sm font-medium pt-2 border-t">
-            <span>Monthly Profit</span>
-            <span className={(profitability.monthly_profit_usd || 0) >= 0 ? 'text-green-500' : 'text-red-500'}>
-              {formatCurrency(profitability.monthly_profit_usd || 0, 4)}
-            </span>
+            <span className="text-muted-foreground">Yearly Energy Cost</span>
+            <span>{formatWithCurrency(energyCosts.yearly_cost)}</span>
           </div>
         </div>
 
-        {/* Break-even */}
-        {profitability.break_even_btc_price && (
+        {/* Break-even (only if revenue stats enabled) */}
+        {showRevenue && profitability.break_even_btc_price && (
           <div className="p-2 sm:p-3 rounded-lg bg-muted/50 text-center">
             <p className="text-[10px] sm:text-xs text-muted-foreground">Break-even BTC Price</p>
-            <p className="text-base sm:text-lg font-semibold">{formatCurrency(profitability.break_even_btc_price)}</p>
+            <p className="text-base sm:text-lg font-semibold">${profitability.break_even_btc_price?.toLocaleString()}</p>
+          </div>
+        )}
+
+        {/* Network Data Info */}
+        {showRevenue && networkData.btc_price && (
+          <div className="text-[10px] sm:text-xs text-muted-foreground text-center pt-2 border-t">
+            BTC: ${Number(networkData.btc_price).toLocaleString()} |
+            Network: {Number(networkData.network_hashrate_ehs).toFixed(1)} EH/s
+            {networkData.updated_at && (
+              <span className="block">Updated: {new Date(networkData.updated_at).toLocaleString()}</span>
+            )}
+          </div>
+        )}
+
+        {/* Solo Mining Notice */}
+        {!showRevenue && (
+          <div className="text-xs text-muted-foreground text-center p-2 rounded bg-muted/50">
+            Revenue stats disabled (solo mining mode)
           </div>
         )}
       </CardContent>
@@ -1118,6 +1183,16 @@ export default function AnalyticsDashboard() {
   const [error, setError] = useState(null)
 
   useEffect(() => {
+    // Refresh network data (BTC price, hashrate) when visiting analytics page
+    const refreshNetworkData = async () => {
+      try {
+        await api.post('/api/settings/network-data/refresh/')
+      } catch (err) {
+        console.error('Error refreshing network data:', err)
+      }
+    }
+
+    refreshNetworkData()
     fetchAnalytics()
     const interval = setInterval(fetchAnalytics, 300000) // Refresh every 5 minutes
     return () => clearInterval(interval)

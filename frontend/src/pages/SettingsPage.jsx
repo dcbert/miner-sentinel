@@ -24,6 +24,7 @@ import {
   CheckCircle2,
   Clock,
   Cpu,
+  DollarSign,
   Edit,
   EyeOff,
   Plus,
@@ -71,10 +72,15 @@ export default function SettingsPage() {
     telegram_bot_token: '',
     telegram_chat_id: '',
     telegram_bot_token_configured: false,
+    // Cost analysis settings
+    energy_rate: 0.12,
+    energy_currency: 'USD',
+    show_revenue_stats: true,
   })
   const [showTelegramToken, setShowTelegramToken] = useState(false)
   const [collectorStatus, setCollectorStatus] = useState(null)
   const [savingSettings, setSavingSettings] = useState(false)
+
 
   // Delete confirmation
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -112,6 +118,9 @@ export default function SettingsPage() {
           telegram_bot_token: '', // Never returned from API for security
           telegram_chat_id: collectorRes.data.telegram_chat_id || '',
           telegram_bot_token_configured: collectorRes.data.telegram_bot_token_configured || false,
+          energy_rate: collectorRes.data.energy_rate || 0.12,
+          energy_currency: collectorRes.data.energy_currency || 'USD',
+          show_revenue_stats: collectorRes.data.show_revenue_stats !== undefined ? collectorRes.data.show_revenue_stats : true,
         })
         // Reset token visibility when refreshing
         setShowTelegramToken(false)
@@ -553,22 +562,57 @@ export default function SettingsPage() {
                     <Label htmlFor="ckpool_url" className="text-sm">CKPool Server</Label>
                     <Select
                       id="ckpool_url"
-                      value={collectorSettings.ckpool_url}
-                      onValueChange={(value) =>
-                        setCollectorSettings({
-                          ...collectorSettings,
-                          ckpool_url: value,
-                        })
+                      value={
+                        ['https://solo.ckpool.org', 'https://eusolo.ckpool.org', 'https://ussolo.ckpool.org'].includes(collectorSettings.ckpool_url)
+                          ? collectorSettings.ckpool_url
+                          : 'custom'
                       }
+                      onValueChange={(value) => {
+                        if (value === 'custom') {
+                          setCollectorSettings({
+                            ...collectorSettings,
+                            ckpool_url: '',
+                          })
+                        } else {
+                          setCollectorSettings({
+                            ...collectorSettings,
+                            ckpool_url: value,
+                          })
+                        }
+                      }}
                     >
                       <SelectOption value="https://solo.ckpool.org">solo.ckpool.org (Main)</SelectOption>
                       <SelectOption value="https://eusolo.ckpool.org">eusolo.ckpool.org (Europe)</SelectOption>
                       <SelectOption value="https://ussolo.ckpool.org">ussolo.ckpool.org (US)</SelectOption>
+                      <SelectOption value="custom">Custom Instance</SelectOption>
                     </Select>
                     <p className="text-xs text-muted-foreground">
-                      Select your preferred CKPool server
+                      Select your preferred CKPool server or use a custom instance
                     </p>
                   </div>
+
+                  {/* Custom CKPool URL input */}
+                  {!['https://solo.ckpool.org', 'https://eusolo.ckpool.org', 'https://ussolo.ckpool.org'].includes(collectorSettings.ckpool_url) && (
+                    <div className="space-y-2 min-w-0 overflow-hidden">
+                      <Label htmlFor="ckpool_custom_url" className="text-sm">Custom CKPool URL</Label>
+                      <Input
+                        id="ckpool_custom_url"
+                        type="text"
+                        className="w-full"
+                        placeholder="https://your-ckpool-instance.com"
+                        value={collectorSettings.ckpool_url}
+                        onChange={(e) =>
+                          setCollectorSettings({
+                            ...collectorSettings,
+                            ckpool_url: e.target.value,
+                          })
+                        }
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Enter the full URL of your custom CKPool instance (e.g., https://mypool.local:8080)
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -721,6 +765,75 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Cost Analysis Settings */}
+              <div className="pt-4 border-t space-y-4">
+                <div className="flex items-center gap-2">
+                  <DollarSign className="h-4 w-4" />
+                  <Label className="text-base font-medium">Cost Analysis</Label>
+                </div>
+
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="energy_rate">Energy Rate (per kWh)</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="energy_rate"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.12"
+                        value={collectorSettings.energy_rate}
+                        onChange={(e) =>
+                          setCollectorSettings({
+                            ...collectorSettings,
+                            energy_rate: parseFloat(e.target.value) || 0,
+                          })
+                        }
+                        className="flex-1"
+                      />
+                      <Select
+                        value={collectorSettings.energy_currency}
+                        onValueChange={(value) =>
+                          setCollectorSettings({
+                            ...collectorSettings,
+                            energy_currency: value,
+                          })
+                        }
+                        className="w-24"
+                      >
+                        <SelectOption value="USD">USD</SelectOption>
+                        <SelectOption value="EUR">EUR</SelectOption>
+                        <SelectOption value="GBP">GBP</SelectOption>
+                        <SelectOption value="CHF">CHF</SelectOption>
+                      </Select>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Your electricity cost per kilowatt-hour
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="show_revenue_stats">Show Revenue Statistics</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Enable to show estimated earnings (disable for solo mining)
+                    </p>
+                  </div>
+                  <Switch
+                    id="show_revenue_stats"
+                    checked={collectorSettings.show_revenue_stats}
+                    onCheckedChange={(checked) =>
+                      setCollectorSettings({
+                        ...collectorSettings,
+                        show_revenue_stats: checked,
+                      })
+                    }
+                  />
+                </div>
+
               </div>
 
               {/* Action buttons */}

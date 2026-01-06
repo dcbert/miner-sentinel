@@ -29,6 +29,8 @@ urlpatterns = [
     # Settings endpoints
     path('settings/collector/', views.collector_settings_view, name='collector-settings'),
     path('settings/collector/poll/', views.trigger_collector_poll, name='collector-poll'),
+    path('settings/network-data/', views.get_network_data, name='network-data'),
+    path('settings/network-data/refresh/', views.refresh_network_data, name='refresh-network-data'),
     # Authentication endpoints
     path('auth/csrf/', views.csrf_token_view, name='csrf-token'),
     path('auth/login/', views.login_view, name='login'),

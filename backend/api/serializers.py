@@ -95,10 +95,27 @@ class CollectorSettingsSerializer(serializers.ModelSerializer):
             'telegram_bot_token',
             'telegram_bot_token_configured',
             'telegram_chat_id',
+            # Cost analysis settings
+            'energy_rate',
+            'energy_currency',
+            'show_revenue_stats',
+            # Cached network data (read-only)
+            'cached_btc_price',
+            'cached_network_hashrate',
+            'cached_network_difficulty',
+            'network_data_updated_at',
             'updated_at',
             'created_at',
         ]
-        read_only_fields = ['updated_at', 'created_at', 'telegram_bot_token_configured']
+        read_only_fields = [
+            'updated_at',
+            'created_at',
+            'telegram_bot_token_configured',
+            'cached_btc_price',
+            'cached_network_hashrate',
+            'cached_network_difficulty',
+            'network_data_updated_at',
+        ]
         extra_kwargs = {
             'telegram_bot_token': {'write_only': True},  # Never return the actual token
         }
