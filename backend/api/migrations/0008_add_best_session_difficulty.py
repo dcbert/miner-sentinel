@@ -17,7 +17,7 @@ class Migration(migrations.Migration):
             field=models.BigIntegerField(
                 blank=True,
                 null=True,
-                help_text="Current session best difficulty"
+                help_text="Current session best difficulty (from API 'bestSessionDiff')"
             ),
         ),
         # Update help_text for existing best_difficulty field
