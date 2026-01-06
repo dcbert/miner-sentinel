@@ -343,6 +343,14 @@ class CollectorSettings(models.Model):
         ('publicpool', 'Public Pool'),
     ]
 
+    # Currency choices
+    CURRENCY_CHOICES = [
+        ('USD', 'US Dollar ($)'),
+        ('EUR', 'Euro (€)'),
+        ('GBP', 'British Pound (£)'),
+        ('CHF', 'Swiss Franc (CHF)'),
+    ]
+
     # Polling configuration
     polling_interval_minutes = models.IntegerField(
         default=15,
@@ -392,6 +400,54 @@ class CollectorSettings(models.Model):
     telegram_enabled = models.BooleanField(default=False)
     telegram_bot_token = models.CharField(max_length=255, blank=True, default='')
     telegram_chat_id = models.CharField(max_length=255, blank=True, default='')
+
+    # Cost Analysis Settings
+    energy_rate = models.DecimalField(
+        max_digits=10,
+        decimal_places=4,
+        default=0.12,
+        help_text="Energy cost per kWh in selected currency"
+    )
+    energy_currency = models.CharField(
+        max_length=3,
+        choices=[
+            ('USD', 'US Dollar ($)'),
+            ('EUR', 'Euro (€)'),
+            ('GBP', 'British Pound (£)'),
+            ('CHF', 'Swiss Franc (CHF)'),
+        ],
+        default='USD',
+        help_text="Currency for energy costs"
+    )
+    show_revenue_stats = models.BooleanField(
+        default=True,
+        help_text="Show mining revenue statistics (based on solo mining probability)"
+    )
+
+    # Cached network data (updated periodically)
+    cached_btc_price = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        default=100000,
+        help_text="Cached Bitcoin price in USD"
+    )
+    cached_network_hashrate = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        default=750,
+        help_text="Cached network hashrate in EH/s"
+    )
+    cached_network_difficulty = models.DecimalField(
+        max_digits=30,
+        decimal_places=0,
+        default=0,
+        help_text="Cached network difficulty"
+    )
+    network_data_updated_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="When network data was last updated"
+    )
 
     # Metadata
     updated_at = models.DateTimeField(auto_now=True)
