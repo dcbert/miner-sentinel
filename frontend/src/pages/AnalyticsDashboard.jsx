@@ -463,9 +463,8 @@ function BestSharesHistoryChart({ dailyBests }) {
   const chartData = dailyBests.map(item => ({
     date: item.date,
     dateFormatted: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    difficulty: item.best_difficulty || 0,
-    runningMax: item.running_max || 0,
-    isRecord: item.is_new_record || false,
+    bestEver: item.best_difficulty || 0,           // All-time best difficulty
+    bestSession: item.best_session_difficulty || 0, // Session best difficulty
   }))
 
   return (
@@ -475,16 +474,33 @@ function BestSharesHistoryChart({ dailyBests }) {
           <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5" />
           <span className="truncate">Best Shares History (Last 30 Days)</span>
         </CardTitle>
-        <CardDescription className="text-xs sm:text-sm">Daily best shares with running maximum</CardDescription>
+        <CardDescription className="text-xs sm:text-sm">
+          Daily best shares: All-Time Best vs Session Best
+        </CardDescription>
       </CardHeader>
       <CardContent className="px-2 sm:px-6">
+        {/* Legend */}
+        <div className="flex flex-wrap gap-4 mb-4 text-xs sm:text-sm">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-0.5 bg-primary"></div>
+            <span className="text-muted-foreground">Best Ever (All-Time)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-0.5 bg-orange-500"></div>
+            <span className="text-muted-foreground">Best Session</span>
+          </div>
+        </div>
         <div className="h-64 sm:h-80">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
               <defs>
-                <linearGradient id="diffGradient" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id="bestEverGradient" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="bestSessionGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="hsl(24, 95%, 53%)" stopOpacity={0.2} />
+                  <stop offset="95%" stopColor="hsl(24, 95%, 53%)" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
@@ -514,12 +530,12 @@ function BestSharesHistoryChart({ dailyBests }) {
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div className="flex flex-col">
-                            <span className="text-[0.70rem] uppercase text-muted-foreground">Daily Best</span>
-                            <span className="font-bold text-primary">{formatDifficulty(payload[0]?.value)}</span>
+                            <span className="text-[0.70rem] uppercase text-muted-foreground">Best Ever</span>
+                            <span className="font-bold text-primary">{formatDifficulty(payload[0]?.payload?.bestEver)}</span>
                           </div>
                           <div className="flex flex-col">
-                            <span className="text-[0.70rem] uppercase text-muted-foreground">Running Max</span>
-                            <span className="font-bold text-chart-2">{formatDifficulty(payload[1]?.value)}</span>
+                            <span className="text-[0.70rem] uppercase text-muted-foreground">Best Session</span>
+                            <span className="font-bold text-orange-500">{formatDifficulty(payload[0]?.payload?.bestSession)}</span>
                           </div>
                         </div>
                       </div>
@@ -528,22 +544,23 @@ function BestSharesHistoryChart({ dailyBests }) {
                   return null
                 }}
               />
-              <Area
-                type="stepAfter"
-                dataKey="runningMax"
-                stroke="hsl(var(--chart-2))"
-                fill="none"
-                strokeWidth={2}
-                strokeDasharray="5 5"
-                name="Running Max"
-              />
+              {/* Session best area */}
               <Area
                 type="monotone"
-                dataKey="difficulty"
-                stroke="hsl(var(--primary))"
-                fill="url(#diffGradient)"
+                dataKey="bestSession"
+                stroke="hsl(24, 95%, 53%)"
+                fill="url(#bestSessionGradient)"
                 strokeWidth={2}
-                name="Daily Best"
+                name="Best Session"
+              />
+              {/* All-time best area (on top) */}
+              <Area
+                type="monotone"
+                dataKey="bestEver"
+                stroke="hsl(var(--primary))"
+                fill="url(#bestEverGradient)"
+                strokeWidth={2}
+                name="Best Ever"
               />
             </AreaChart>
           </ResponsiveContainer>

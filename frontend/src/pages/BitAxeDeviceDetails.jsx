@@ -357,7 +357,7 @@ export default function BitAxeDeviceDetails() {
                 <span className="text-lg sm:text-2xl font-bold text-green-500">{acceptanceRate}%</span>
               </div>
               <div className="text-center sm:text-right">
-                <p className="text-[10px] sm:text-xs text-muted-foreground mb-0.5 sm:mb-1">Best Difficulty</p>
+                <p className="text-[10px] sm:text-xs text-muted-foreground mb-0.5 sm:mb-1">Best Ever</p>
                 <span className="text-lg sm:text-2xl font-bold text-orange-500">{formatNumber(latest_mining.best_difficulty)}</span>
               </div>
             </div>
@@ -522,7 +522,8 @@ export default function BitAxeDeviceDetails() {
                 <CardContent className="space-y-0">
                   <InfoRow label="Pool URL" value={latest_mining.pool_url} mono />
                   <InfoRow label="Pool User" value={latest_mining.pool_user?.substring(0, 25) + '...'} mono />
-                  <InfoRow label="Best Difficulty" value={formatNumber(latest_mining.best_difficulty)} />
+                  <InfoRow label="Best Ever" value={formatNumber(latest_mining.best_difficulty)} />
+                  <InfoRow label="Best Session" value={formatNumber(latest_mining.best_session_difficulty)} />
                   <InfoRow label="Blocks Found" value={latest_mining.blocks_found?.toString()} />
                   <InfoRow label="Uptime" value={formatUptime(latest_mining.uptime_seconds)} />
                   <InfoRow label="Last Updated" value={formatDate(latest_mining.recorded_at)} />

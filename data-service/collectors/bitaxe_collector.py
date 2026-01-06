@@ -102,12 +102,20 @@ class BitAxeCollector:
             conn.close()
 
     def check_best_difficulty_improvement(self, device_db_id, device_id, device_name, current_best_diff):
-        """Check if device achieved a new best difficulty."""
+        """Check if device achieved a new all-time best difficulty.
+
+        Args:
+            device_db_id: Database ID of the device
+            device_id: Human-readable device identifier
+            device_name: Display name of the device
+            current_best_diff: Current all-time best difficulty (from API 'bestDiff' field)
+        """
         conn = self.get_db_connection()
         cursor = conn.cursor()
 
         try:
-            # Get the previous best difficulty from the last record
+            # Get the previous all-time best difficulty from the last record
+            # We compare best_difficulty (all-time) values, not session values
             cursor.execute("""
                 SELECT best_difficulty
                 FROM bitaxe_mining_stats
@@ -231,17 +239,22 @@ class BitAxeCollector:
             # Parse hashrate (already in GH/s from API)
             hashrate_ghs = system_info.get('hashRate', 0)
 
-            # Parse best session difficulty (comes as string like "22.23 M")
+            # Parse best difficulties from API:
+            # - bestDiff: All-time best difficulty ever achieved by device
+            # - bestSessionDiff: Best difficulty achieved in current mining session
+            best_diff_str = system_info.get('bestDiff', '0')
+            best_difficulty_ever = self._parse_difficulty(best_diff_str)
+
             best_session_str = system_info.get('bestSessionDiff', '0')
-            best_session = self._parse_difficulty(best_session_str)
+            best_session_difficulty = self._parse_difficulty(best_session_str)
 
             # Insert mining stats
             cursor.execute("""
                 INSERT INTO bitaxe_mining_stats (
                     device_id, recorded_at, hashrate_ghs, shares_accepted,
                     shares_rejected, blocks_found, uptime_seconds,
-                    best_difficulty, pool_url, pool_user
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    best_difficulty, best_session_difficulty, pool_url, pool_user
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 device_db_id,
                 recorded_at,
@@ -250,7 +263,8 @@ class BitAxeCollector:
                 system_info.get('sharesRejected', 0),
                 0,  # blocks_found not in API
                 system_info.get('uptimeSeconds', 0),
-                best_session,
+                best_difficulty_ever,      # best_difficulty = all-time best (from 'bestDiff')
+                best_session_difficulty,   # best_session_difficulty = session best (from 'bestSessionDiff')
                 system_info.get('stratumURL'),
                 system_info.get('stratumUser')
             ))
@@ -322,9 +336,16 @@ class BitAxeCollector:
 
             # Check for notification conditions after data is saved
             self.check_hashrate_stagnation(device_db_id, device_id, device_name, hashrate_ghs, device_ip)
-            self.check_best_difficulty_improvement(device_db_id, device_id, device_name, best_session)
+            # Use all-time best difficulty for improvement notifications (more meaningful achievement)
+            self.check_best_difficulty_improvement(device_db_id, device_id, device_name, best_difficulty_ever)
 
-            logger.info(f"Collected data from device {device_id} - Hashrate: {hashrate_ghs:.2f} GH/s, Temp: {system_info.get('temp')}°C")
+            logger.info(
+                f"Collected data from device {device_id} - "
+                f"Hashrate: {hashrate_ghs:.2f} GH/s, "
+                f"Temp: {system_info.get('temp')}°C, "
+                f"Best Ever: {best_difficulty_ever}, "
+                f"Best Session: {best_session_difficulty}"
+            )
 
         except Exception as e:
             # Mark device as offline and log the error
