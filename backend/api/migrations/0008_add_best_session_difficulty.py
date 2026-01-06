@@ -27,7 +27,7 @@ class Migration(migrations.Migration):
             field=models.BigIntegerField(
                 blank=True,
                 null=True,
-                help_text="All-time best difficulty"
+                help_text="All-time best difficulty (from API 'bestDiff')"
             ),
         ),
     ]
