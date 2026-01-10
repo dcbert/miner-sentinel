@@ -84,6 +84,16 @@ def load_settings_from_database():
             logger.info(f"Loaded settings from database: polling={collector_settings['polling_interval_minutes']}min, "
                        f"device_check={collector_settings['device_check_interval_minutes']}min, "
                        f"pool_type={collector_settings.get('pool_type', 'ckpool')}")
+
+            # Update telegram settings in collectors
+            telegram_enabled = collector_settings.get('telegram_enabled', False)
+            telegram_bot_token = collector_settings.get('telegram_bot_token', '')
+            telegram_chat_id = collector_settings.get('telegram_chat_id', '')
+
+            bitaxe_collector.update_telegram_settings(telegram_enabled, telegram_bot_token, telegram_chat_id)
+            avalon_collector.update_telegram_settings(telegram_enabled, telegram_bot_token, telegram_chat_id)
+
+            logger.info(f"Telegram notifications: {'enabled' if telegram_enabled else 'disabled'}")
         else:
             logger.warning("No settings found in database, using defaults")
 
