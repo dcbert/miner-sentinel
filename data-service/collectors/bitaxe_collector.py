@@ -21,6 +21,16 @@ class BitAxeCollector:
         self.devices = []  # Will be populated from database
         self.telegram_notifier = TelegramNotifier()
 
+    def update_telegram_settings(self, enabled, bot_token, chat_id):
+        """Update telegram notification settings."""
+        logger.info(f"Updating telegram settings: enabled={enabled}")
+        if enabled and bot_token and chat_id:
+            self.telegram_notifier = TelegramNotifier(bot_token=bot_token, chat_id=chat_id)
+            logger.info("Telegram notifier enabled with settings from database")
+        else:
+            self.telegram_notifier = TelegramNotifier()  # Disabled
+            logger.info("Telegram notifier disabled")
+
     def update_devices(self, devices):
         """Update the list of devices to monitor from database."""
         self.devices = devices
