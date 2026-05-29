@@ -461,7 +461,8 @@ class AvalonCollector:
             stats_info = self._socket_request(device_ip, 'estats')
             pools_info = self._socket_request(device_ip, 'pools')
 
-            # Mark device as online since we got successful responses
+            # Mark device as online since we got successful responses.
+            # (GH-18) DB work after this point should not flip status back to offline on transient errors.
             self.update_device_status(device_id, device_ip, True)
 
             conn = self.get_db_connection()
@@ -584,10 +585,11 @@ class AvalonCollector:
             logger.info(f"Collected data from device {device_id} - Hashrate: {hashrate_ghs:.2f} GH/s, Temp: {temperature_c}°C")
 
         except Exception as e:
-            # Mark device as offline and log the error
+            # (GH-18) Only API-level failures before the success mark should mark offline.
+            # Post-contact DB errors are logged but do not cause spurious Pending in UI.
             error_msg = str(e)
-            logger.error(f"Error collecting data from device {device_id} ({device_ip}): {e}", exc_info=True)
-            self.update_device_status(device_id, device_ip, False, error_msg)
+            logger.error(f"Error collecting/processing data from device {device_id} ({device_ip}): {e}", exc_info=True)
+            # Do not force offline here (last_seen was already updated on successful socket responses).
 
     def collect_all_devices(self):
         """Collect data from all Avalon devices."""

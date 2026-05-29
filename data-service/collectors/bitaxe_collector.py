@@ -227,10 +227,11 @@ class BitAxeCollector:
     def collect_device_data(self, device_id, device_ip):
         """Collect mining and hardware data from a single Bitaxe device."""
         try:
-            # Fetch data from Bitaxe API
+            # Fetch data from Bitaxe API (with built-in retries)
             system_info = self._api_request(device_ip, 'api/system/info')
 
-            # Mark device as online since we got a successful response
+            # Mark device as online / update last_seen immediately on successful contact.
+            # Do NOT let later DB parse/insert errors flip it to offline (GH-18 robustness).
             self.update_device_status(device_id, device_ip, True)
 
             conn = self.get_db_connection()
@@ -358,10 +359,12 @@ class BitAxeCollector:
             )
 
         except Exception as e:
-            # Mark device as offline and log the error
+            # Only mark offline if the *API contact itself* failed (before the success mark).
+            # DB insert/parse errors after successful device response should not cause
+            # spurious "Pending" flips (see GH-18). Log and continue.
             error_msg = str(e)
-            logger.error(f"Error collecting data from device {device_id} ({device_ip}): {e}", exc_info=True)
-            self.update_device_status(device_id, device_ip, False, error_msg)
+            logger.error(f"Error collecting/processing data from device {device_id} ({device_ip}) after successful API response: {e}", exc_info=True)
+            # Do not call update_device_status(..., False) here — last_seen was already updated.
 
     def _parse_difficulty(self, diff_str):
         """Parse difficulty string like '22.23 M' to float."""
