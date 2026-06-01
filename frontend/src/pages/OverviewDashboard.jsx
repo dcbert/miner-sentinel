@@ -1,6 +1,6 @@
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import api from '@/lib/api'
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import api from '@/lib/api';
 import {
     Activity,
     AlertTriangle,
@@ -14,9 +14,8 @@ import {
     TrendingDown,
     TrendingUp,
     Zap
-} from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { Area, AreaChart, ResponsiveContainer } from 'recharts'
+} from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 // Import dashboard components
 import {
@@ -31,7 +30,7 @@ import {
     formatNumber,
     formatShares,
     getBestShare
-} from '@/components/dashboard'
+} from '@/components/dashboard';
 
 // ============================================
 // HELPER COMPONENTS
@@ -85,84 +84,6 @@ function HeroMetric({
         </div>
       </div>
     </div>
-  )
-}
-
-// Compact stat row for detailed sections
-function CompactStat({ label, value, icon: Icon, variant = 'default' }) {
-  const variantStyles = {
-    default: 'text-foreground',
-    success: 'text-green-500',
-    warning: 'text-yellow-500',
-    danger: 'text-red-500',
-    muted: 'text-muted-foreground',
-  }
-  return (
-    <div className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
-      <div className="flex items-center gap-2">
-        {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground" />}
-        <span className="text-sm text-muted-foreground">{label}</span>
-      </div>
-      <span className={`text-sm font-medium ${variantStyles[variant]}`}>{value}</span>
-    </div>
-  )
-}
-
-// Mini sparkline chart for trends
-function MiniSparkline({ data, dataKey, color = 'hsl(var(--chart-1))', height = 40 }) {
-  if (!data || data.length === 0) return null
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <AreaChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-        <defs>
-          <linearGradient id={`sparkline-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity={0.3} />
-            <stop offset="100%" stopColor={color} stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <Area
-          type="monotone"
-          dataKey={dataKey}
-          stroke={color}
-          fill={`url(#sparkline-${dataKey})`}
-          strokeWidth={1.5}
-          dot={false}
-        />
-      </AreaChart>
-    </ResponsiveContainer>
-  )
-}
-
-// Device status card
-function DeviceStatusCard({ bitaxeCount, avalonCount, totalActive }) {
-  return (
-    <Card className="col-span-full lg:col-span-1">
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-base font-semibold">Devices Online</CardTitle>
-          <StatusDot status={totalActive > 0 ? 'online' : 'offline'} />
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="flex items-center gap-4">
-          <div className="text-4xl font-bold">{totalActive}</div>
-          <div className="flex-1 space-y-1">
-            {bitaxeCount > 0 && (
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-xs">Bitaxe</Badge>
-                <span className="text-sm font-medium">{bitaxeCount}</span>
-              </div>
-            )}
-            {avalonCount > 0 && (
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-xs">Avalon</Badge>
-                <span className="text-sm font-medium">{avalonCount}</span>
-              </div>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
   )
 }
 

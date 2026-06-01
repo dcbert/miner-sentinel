@@ -1,4 +1,4 @@
-import { Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 export default function MiningPerformanceChart({ data, formatAxisHashrate, formatAxisShares, formatHashrate, formatShares }) {
   if (!data || data.length === 0) {

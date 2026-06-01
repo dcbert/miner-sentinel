@@ -393,6 +393,15 @@ class CollectorSettings(models.Model):
     telegram_bot_token = models.CharField(max_length=255, blank=True, default='')
     telegram_chat_id = models.CharField(max_length=255, blank=True, default='')
 
+    # Discord webhook notifications (optional)
+    discord_enabled = models.BooleanField(default=False)
+    discord_webhook_url = models.CharField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text="Discord webhook URL for alerts (create in Discord channel settings)"
+    )
+
     # Cost Analysis Settings
     energy_rate = models.DecimalField(
         max_digits=10,

@@ -85,6 +85,8 @@ services:
       BITAXE_POLL_INTERVAL: 60
       AVALON_POLL_INTERVAL: 60
       POOL_POLL_INTERVAL: 300
-      # Telegram notifications (optional - configure via Django admin)
+      # Telegram notifications (optional - configure via Django admin / Settings page)
       TELEGRAM_BOT_TOKEN: ""
       TELEGRAM_CHAT_ID: ""
+      # Discord notifications (optional)
+      DISCORD_WEBHOOK_URL: ""
