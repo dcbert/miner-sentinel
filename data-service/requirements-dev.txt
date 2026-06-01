@@ -1,0 +1,8 @@
+# Development and test dependencies for data-service
+# Install with: pip install -r requirements-dev.txt
+# These are NOT included in the production Dockerfile/requirements.txt
+
+pytest>=8.0.0
+pytest-cov>=5.0.0
+# Add mocking / http fixtures as needed for collector tests
+responses>=0.25.0

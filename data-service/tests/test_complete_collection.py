@@ -8,9 +8,11 @@ import re
 import socket
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
-# Add the collectors directory to the path
-sys.path.append('/Users/davidebert/Desktop/Documents/MinerSentinel/data-service')
+# Portable path setup: add data-service root so "from collectors..." and "from notifications..." work
+# regardless of cwd, invocation dir, or CI environment. Fixes previous hardcoded /Users/... path.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 def socket_request(ip, command, timeout=10):
     """Make TCP socket request to Avalon device using cgminer API."""
@@ -105,89 +107,39 @@ def parse_temperature_from_stats(stats_info):
         return 0.0
 
 def test_complete_data_collection():
-    """Test complete data collection from the Avalon device."""
-    device_ip = "192.168.1.100"  # Replace with your Avalon device IP
-    device_id = "avalon_1"
+    """Test complete data collection from the Avalon device.
+    Skipped automatically when device is unreachable.
+    """
+    import pytest
+    device_ip = "192.168.1.100"
 
-    print(f"Testing complete data collection from {device_ip}")
-    print("=" * 60)
-
+    # Skip test if device is not reachable (no live hardware in CI)
     try:
-        # Get device information using cgminer API commands
-        print("1. Getting version info...")
-        version_info = socket_request(device_ip, 'version')
-        print(f"   Device: {version_info.get('PROD', 'Unknown')}")
-        print(f"   Model: {version_info.get('MODEL', 'Unknown')}")
-        print(f"   MAC: {version_info.get('MAC', 'Unknown')}")
+        import socket as _socket
+        s = _socket.create_connection((device_ip, 4028), timeout=2)
+        s.close()
+    except OSError:
+        pytest.skip(f"Avalon device not reachable at {device_ip}:4028 — skipping live test")
 
-        print("\n2. Getting summary info...")
-        summary_info = socket_request(device_ip, 'summary')
-        hashrate_ghs = parse_hashrate_mhs(summary_info.get('MHS av', '0'))
-        uptime_seconds = int(summary_info.get('Elapsed', 0))
-        shares_accepted = int(summary_info.get('Accepted', 0))
-        shares_rejected = int(summary_info.get('Rejected', 0))
+    version_info = socket_request(device_ip, 'version')
+    assert version_info, "version command returned empty response"
 
-        print(f"   Hashrate: {hashrate_ghs:.2f} GH/s")
-        print(f"   Uptime: {uptime_seconds} seconds ({uptime_seconds/3600:.1f} hours)")
-        print(f"   Shares: {shares_accepted} accepted, {shares_rejected} rejected")
+    summary_info = socket_request(device_ip, 'summary')
+    hashrate_ghs = parse_hashrate_mhs(summary_info.get('MHS av', '0'))
+    assert hashrate_ghs > 0, "Hashrate should be positive on a live device"
 
-        print("\n3. Getting hardware stats...")
-        stats_info = socket_request(device_ip, 'estats')
-        print(f"   Stats data sample: {str(stats_info)[:200]}...")
+    uptime_seconds = int(summary_info.get('Elapsed', 0))
+    shares_accepted = int(summary_info.get('Accepted', 0))
+    shares_rejected = int(summary_info.get('Rejected', 0))
+    assert uptime_seconds >= 0
+    assert shares_accepted >= 0
 
-        # Debug temperature parsing
-        mm_id0 = stats_info.get('MM ID0', '')
-        print(f"   MM ID0 length: {len(mm_id0)}")
-        print(f"   MM ID0 sample: {mm_id0[:100]}...")
+    stats_info = socket_request(device_ip, 'estats')
+    temperature_c = parse_temperature_from_stats(stats_info)
+    assert temperature_c > 0, "Temperature should be positive on a live device"
 
-        temperature_c = parse_temperature_from_stats(stats_info)
-        print(f"   Temperature: {temperature_c}°C")
-
-        print("\n4. Getting pool info...")
-        pools_info = socket_request(device_ip, 'pools')
-        print(f"   Pool data received: {len(str(pools_info))} characters")
-
-        # Debug: print the actual pool data
-        pool_data_str = str(pools_info)
-        print(f"   Pool data sample: {pool_data_str[:200]}...")
-
-        # Parse pool information
-        pool_url = None
-        pool_user = None
-
-        # Try to extract URL and User from the pool data
-        url_match = re.search(r'URL=([^,]+)', pool_data_str)
-        user_match = re.search(r'User=([^,]+)', pool_data_str)
-
-        if url_match:
-            pool_url = url_match.group(1)
-        if user_match:
-            pool_user = user_match.group(1)
-
-        print(f"   Active pool: {pool_url}")
-        print(f"   Pool user: {pool_user}")
-
-        print("\n5. Summary of collected data:")
-        print("   ✅ Device identification successful")
-        print("   ✅ Mining statistics collected")
-        print("   ✅ Hardware monitoring data collected")
-        print("   ✅ Pool configuration retrieved")
-
-        # Calculate some derived metrics
-        recorded_at = datetime.now(timezone.utc)
-        efficiency = 3.8 / (hashrate_ghs / 1000.0) if hashrate_ghs > 0 else 0  # Using estimated 3.8W power
-
-        print(f"\n6. Derived metrics:")
-        print(f"   Timestamp: {recorded_at.isoformat()}")
-        print(f"   Efficiency: {efficiency:.1f} J/TH (estimated)")
-        print(f"   Reject rate: {(shares_rejected/(shares_accepted+shares_rejected)*100):.2f}%")
-
-        print("\n✅ Complete data collection test PASSED!")
-        return True
-
-    except Exception as e:
-        print(f"\n❌ Data collection test FAILED: {e}")
-        return False
+    pools_info = socket_request(device_ip, 'pools')
+    assert pools_info is not None, "Pools command should return data"
 
 if __name__ == "__main__":
     test_complete_data_collection()

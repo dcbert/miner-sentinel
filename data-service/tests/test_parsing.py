@@ -5,9 +5,11 @@ Test the Avalon collector parsing functions with real device data
 
 import os
 import sys
+from pathlib import Path
 
-# Add the collectors directory to the path
-sys.path.append('/Users/davidebert/Desktop/Documents/MinerSentinel/data-service')
+# Portable path setup: add data-service root so "from collectors..." and "from notifications..." work
+# regardless of cwd, invocation dir, or CI environment. Fixes previous hardcoded /Users/... path.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from collectors.avalon_collector import AvalonCollector
 
@@ -36,45 +38,43 @@ def test_parsing():
         'DNA': '02010000bd448216'
     }
 
-    # Create a collector instance (we won't use database features, just parsing)
-    collector = AvalonCollector(['192.168.1.100'], 'dummy_url')  # Example IP
-
-    print("Testing Avalon parsing functions:")
-    print("=" * 50)
+    # Create a collector instance (we won't use database features, just parsing).
+    # Updated for new AvalonCollector(database_url) signature.
+    collector = AvalonCollector("postgresql://test:test@localhost:5432/test")  # dummy URL for parsing-only test
 
     # Test hashrate parsing
     hashrate = collector._parse_hashrate_mhs(summary_info.get('MHS av', '0'))
-    print(f"Hashrate: {hashrate:.2f} GH/s")
+    assert hashrate > 0, "Hashrate should be positive"
+    assert abs(hashrate - 6676.36) < 1.0, f"Expected ~6676 GH/s, got {hashrate}"
 
     # Test temperature parsing
     temperature = collector._parse_temperature_from_stats(stats_info)
-    print(f"Temperature: {temperature}°C")
+    assert temperature > 0, "Temperature should be positive"
+    assert temperature == 65, f"Expected 65°C (from OTemp[65]), got {temperature}"
 
     # Test power parsing
     power = collector._parse_power_from_stats(stats_info)
-    print(f"Power: {power:.1f} W")
+    assert power > 0, "Power should be positive"
 
     # Test fan speed parsing
     fan_speed = collector._parse_fan_speed_from_stats(stats_info)
-    print(f"Fan Speed: {fan_speed} RPM")
+    assert fan_speed >= 0, "Fan speed should be non-negative"
 
     # Test frequency parsing
     frequency = collector._parse_frequency_from_stats(stats_info)
-    print(f"Frequency: {frequency:.2f} MHz")
+    assert frequency > 0, "Frequency should be positive"
 
     # Test voltage parsing
     voltage = collector._parse_voltage_from_stats(stats_info)
-    print(f"Voltage: {voltage:.2f} V")
+    assert voltage >= 0, "Voltage should be non-negative"
 
     # Test memory usage parsing
     memory_usage = collector._parse_memory_usage_from_stats(stats_info)
-    print(f"Memory Usage: {memory_usage:.1f}%")
+    assert 0 <= memory_usage <= 100, f"Memory usage should be 0-100%, got {memory_usage}"
 
-    # Calculate efficiency
+    # Efficiency sanity check
     efficiency = (power / (hashrate / 1000.0)) if hashrate > 0 else 0
-    print(f"Efficiency: {efficiency:.1f} J/TH")
-
-    print("\nParsing test completed!")
+    assert efficiency > 0, "Efficiency should be positive"
 
 if __name__ == "__main__":
     test_parsing()

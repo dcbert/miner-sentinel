@@ -1,0 +1,10 @@
+# Development and test dependencies for backend (Django)
+# Install with: pip install -r requirements-dev.txt
+# These are NOT included in the production Dockerfile/requirements.txt
+
+pytest>=8.0.0
+pytest-cov>=5.0.0
+pytest-django>=4.8.0
+
+# For coverage reporting in CI
+coverage>=7.0

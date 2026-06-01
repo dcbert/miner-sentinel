@@ -6,6 +6,10 @@ Test the Avalon collector directly without Docker to validate the fix
 import logging
 import os
 import sys
+from pathlib import Path
+
+# Portable path setup at module load (used by inner test code too)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -16,8 +20,7 @@ os.environ['DATABASE_URL'] = 'postgresql://test:test@localhost:5432/test'
 def test_collector_socket_communication():
     """Test the collector's socket communication directly."""
 
-    # Add the collector path
-    sys.path.append('/Users/davidebert/Desktop/Documents/MinerSentinel/data-service')
+    # (path already set portably at top of file)
 
     # Import the collector class without database dependencies
     import json
@@ -130,73 +133,32 @@ def test_collector_socket_communication():
 
     # Test the collector
     collector = TestAvalonCollector()
-    device_ip = "192.168.1.100"  # Replace with your Avalon device IP
+    device_ip = "192.168.1.100"
 
-    print(f"🔄 Testing Avalon collector with device {device_ip}")
-    print("=" * 60)
-
+    # Skip if device is unreachable (no live hardware in CI)
+    import socket as _socket
     try:
-        # Test version
-        print("\n1. Testing version command...")
-        version_info = collector._socket_request(device_ip, 'version')
-        print(f"   Device: {version_info.get('PROD', 'Unknown')}")
+        s = _socket.create_connection((device_ip, 4028), timeout=2)
+        s.close()
+    except OSError:
+        import pytest
+        pytest.skip(f"Avalon device not reachable at {device_ip}:4028 — skipping live test")
 
-        # Test summary
-        print("\n2. Testing summary command...")
-        summary_info = collector._socket_request(device_ip, 'summary')
-        mhs_av = summary_info.get('MHS av', 0)
-        hashrate_ghs = collector._parse_hashrate_mhs(mhs_av)
+    version_info = collector._socket_request(device_ip, 'version')
+    assert version_info, "version command returned empty response"
 
-        print(f"   MHS av (raw): {mhs_av}")
-        print(f"   Hashrate: {hashrate_ghs:.2f} GH/s")
-        print(f"   Shares accepted: {summary_info.get('Accepted', 0)}")
-        print(f"   Shares rejected: {summary_info.get('Rejected', 0)}")
-        print(f"   Uptime: {summary_info.get('Elapsed', 0)} seconds")
+    summary_info = collector._socket_request(device_ip, 'summary')
+    mhs_av = summary_info.get('MHS av', 0)
+    hashrate_ghs = collector._parse_hashrate_mhs(mhs_av)
+    assert hashrate_ghs > 0, f"Hashrate should be positive, got {hashrate_ghs}"
 
-        # Test estats
-        print("\n3. Testing estats command...")
-        stats_info = collector._socket_request(device_ip, 'estats')
+    stats_info = collector._socket_request(device_ip, 'estats')
+    temperature = collector._parse_temperature_from_stats(stats_info)
+    power = collector._parse_power_from_stats(stats_info)
 
-        temperature = collector._parse_temperature_from_stats(stats_info)
-        power = collector._parse_power_from_stats(stats_info)
-
-        print(f"   Temperature: {temperature}°C")
-        print(f"   Power: {power}W")
-
-        # Check if data looks correct
-        print(f"\n🎯 Test Results:")
-        if hashrate_ghs > 0:
-            print(f"   ✅ Hashrate detection: {hashrate_ghs:.2f} GH/s")
-        else:
-            print(f"   ❌ Hashrate detection: 0 GH/s - PROBLEM!")
-
-        if power > 0:
-            print(f"   ✅ Power detection: {power}W")
-        else:
-            print(f"   ❌ Power detection: 0W - PROBLEM!")
-
-        if temperature > 0:
-            print(f"   ✅ Temperature detection: {temperature}°C")
-        else:
-            print(f"   ❌ Temperature detection: 0°C - PROBLEM!")
-
-        # Calculate efficiency if we have both values
-        if hashrate_ghs > 0 and power > 0:
-            hashrate_ths = hashrate_ghs / 1000.0
-            efficiency = power / hashrate_ths
-            print(f"   ✅ Efficiency: {efficiency:.2f} J/TH")
-
-        return hashrate_ghs > 0 and power > 0
-
-    except Exception as e:
-        print(f"\n❌ Test failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    assert temperature > 0, f"Temperature should be positive, got {temperature}"
+    assert power > 0, f"Power should be positive, got {power}"
 
 if __name__ == "__main__":
-    success = test_collector_socket_communication()
-    if success:
-        print(f"\n✅ Collector test passed! Ready for Docker deployment.")
-    else:
-        print(f"\n❌ Collector test failed! Need to fix issues before Docker.")
+    test_collector_socket_communication()
+    print("Collector test complete.")

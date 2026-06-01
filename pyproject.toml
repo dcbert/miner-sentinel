@@ -1,0 +1,39 @@
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = [
+    "data-service/tests",
+]
+python_files = ["test_*.py", "*_test.py"]
+python_functions = ["test_*"]
+python_classes = ["Test*"]
+addopts = "-ra -q --strict-markers"
+markers = [
+    "unit: fast unit tests with mocks",
+    "integration: tests requiring live devices or external services (deselect with '-m \"not integration\"')",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.coverage.run]
+source = [
+    "data-service/collectors",
+    "data-service/notifications",
+    "data-service/app.py",
+    "backend/api",
+    "backend/minersentinel",
+]
+omit = [
+    "*/tests/*",
+    "*/migrations/*",
+    "*/venv/*",
+    "*/env/*",
+    "data-service/utils/*",
+]
+branch = true
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+
+[tool.coverage.html]
+directory = "htmlcov"
