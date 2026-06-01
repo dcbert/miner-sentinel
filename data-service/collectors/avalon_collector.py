@@ -39,11 +39,13 @@ class AvalonCollector:
     def update_discord_settings(self, enabled, webhook_url):
         """Update Discord webhook notification settings."""
         logger.info(f"Updating Discord settings: enabled={enabled}")
-        if enabled and webhook_url:
-            self.discord_notifier = DiscordNotifier(webhook_url=webhook_url)
-            logger.info("Discord notifier enabled with webhook from database")
+        if enabled:
+            effective_url = webhook_url if webhook_url else None
+            self.discord_notifier = DiscordNotifier(webhook_url=effective_url)
+            logger.info("Discord notifier enabled" if self.discord_notifier.enabled else "Discord notifier disabled (no webhook configured)")
         else:
-            self.discord_notifier = DiscordNotifier()  # Disabled
+            # Force-disable even if DISCORD_WEBHOOK_URL is set in the environment.
+            self.discord_notifier = DiscordNotifier(webhook_url='')
             logger.info("Discord notifier disabled")
 
     def update_devices(self, devices):
