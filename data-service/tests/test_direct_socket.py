@@ -135,76 +135,49 @@ def parse_hashrate_mhs(mhs_value):
         return 0.0
 
 def test_live_device():
-    """Test with live Avalon device - replace IP with your device"""
-    device_ip = "192.168.1.100"  # Replace with your Avalon device IP
-
-    print(f"Testing live Avalon device at {device_ip}")
-    print("=" * 60)
+    """Test with live Avalon device.
+    Skipped automatically when device is unreachable.
+    """
+    import pytest
+    device_ip = "192.168.1.100"
 
     try:
-        # Test version
-        print("1. Testing version command...")
-        version_info = socket_request(device_ip, 'version')
-        print(f"   Response: {version_info}")
+        import socket as _sock
+        s = _sock.create_connection((device_ip, 4028), timeout=2)
+        s.close()
+    except OSError:
+        pytest.skip(f"Avalon device not reachable at {device_ip}:4028 — skipping live test")
 
-        # Test summary
-        print("\n2. Testing summary command...")
-        summary_info = socket_request(device_ip, 'summary')
-        print(f"   Response keys: {list(summary_info.keys()) if isinstance(summary_info, dict) else 'Not a dict'}")
+    version_info = socket_request(device_ip, 'version')
+    assert version_info, "version command returned empty response"
 
-        if 'MHS av' in summary_info:
-            hashrate = parse_hashrate_mhs(summary_info.get('MHS av', '0'))
-            print(f"   Hashrate: {hashrate:.2f} GH/s")
+    summary_info = socket_request(device_ip, 'summary')
+    assert isinstance(summary_info, dict), "summary should return a dict"
 
-        # Test estats with focus on MM ID0
-        print("\n3. Testing estats command...")
-        stats_info = socket_request(device_ip, 'estats')
-        print(f"   Response keys: {list(stats_info.keys()) if isinstance(stats_info, dict) else 'Not a dict'}")
+    if 'MHS av' in summary_info:
+        hashrate = parse_hashrate_mhs(summary_info.get('MHS av', '0'))
+        assert hashrate > 0, "Hashrate should be positive"
 
-        if 'MM ID0' in stats_info:
-            mm_id0 = stats_info['MM ID0']
-            print(f"   MM ID0 length: {len(mm_id0)}")
-            print(f"   Full MM ID0 content:")
-            print(f"   {mm_id0}")
+    stats_info = socket_request(device_ip, 'estats')
+    assert isinstance(stats_info, dict), "estats should return a dict"
 
-            # Look for temperature-related patterns
-            print(f"\n   Searching for temperature patterns:")
-            if 'OTemp' in mm_id0:
-                print(f"   Found OTemp in MM ID0")
-            if 'Temp' in mm_id0:
-                print(f"   Found Temp in MM ID0")
-            if 'Power' in mm_id0:
-                print(f"   Found Power in MM ID0")
-            if 'Fan' in mm_id0:
-                print(f"   Found Fan in MM ID0")
+    if 'MM ID0' in stats_info:
+        temperature = parse_temperature_from_stats(stats_info)
+        power = parse_power_from_stats(stats_info)
+        fan_speed = parse_fan_speed_from_stats(stats_info)
+        frequency = parse_frequency_from_stats(stats_info)
+        voltage = parse_voltage_from_stats(stats_info)
+        memory_usage = parse_memory_usage_from_stats(stats_info)
 
-            # Test parsing functions
-            temperature = parse_temperature_from_stats(stats_info)
-            power = parse_power_from_stats(stats_info)
-            fan_speed = parse_fan_speed_from_stats(stats_info)
-            frequency = parse_frequency_from_stats(stats_info)
-            voltage = parse_voltage_from_stats(stats_info)
-            memory_usage = parse_memory_usage_from_stats(stats_info)
+        assert temperature >= 0
+        assert power >= 0
+        assert fan_speed >= 0
+        assert frequency >= 0
+        assert voltage >= 0
+        assert 0 <= memory_usage <= 100
 
-            print(f"\n   Parsed values:")
-            print(f"   Temperature: {temperature}°C")
-            print(f"   Power: {power:.1f} W")
-            print(f"   Fan Speed: {fan_speed} RPM")
-            print(f"   Frequency: {frequency:.2f} MHz")
-            print(f"   Voltage: {voltage:.2f} V")
-            print(f"   Memory Usage: {memory_usage:.1f}%")
-
-        # Test pools
-        print("\n4. Testing pools command...")
-        pools_info = socket_request(device_ip, 'pools')
-        print(f"   Response: {pools_info}")
-
-        print("\n✅ Direct socket test completed!")
-
-    except Exception as e:
-        print(f"\n❌ Test failed: {e}")
-        import traceback
-        traceback.print_exc()
+    pools_info = socket_request(device_ip, 'pools')
+    assert pools_info is not None
 
 if __name__ == "__main__":
     test_live_device()

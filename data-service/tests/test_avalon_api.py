@@ -6,6 +6,11 @@ Test script for Avalon Nano 3s socket API communication
 import socket
 import time
 
+# Prevent pytest from collecting this manual/device script as a test (it requires a 'ip' arg
+# with no fixture and is intended for direct `python tests/test_avalon_api.py` execution
+# against real hardware). This fixes the "fixture 'ip' not found" collection error.
+__test__ = False
+
 
 def test_avalon_api(ip, port=4028):
     """Test the Avalon cgminer socket API."""
