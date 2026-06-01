@@ -21,13 +21,10 @@ class DiscordNotifier:
     COLOR_ACHIEVEMENT = 15844367  # Gold for best difficulty
 
     def __init__(self, webhook_url: Optional[str] = None):
-        self.webhook_url = webhook_url or os.getenv('DISCORD_WEBHOOK_URL')
+        # Only fall back to the environment when webhook_url is not explicitly provided.
+        self.webhook_url = os.getenv('DISCORD_WEBHOOK_URL') if webhook_url is None else webhook_url
 
         logger.info(f"Discord webhook configured: {bool(self.webhook_url)}")
-        if self.webhook_url:
-            # Don't log the full URL for security
-            masked = self.webhook_url[:50] + "..." if len(self.webhook_url) > 50 else self.webhook_url
-            logger.info(f"Discord webhook URL: {masked}")
 
         if not self.webhook_url:
             logger.warning("Discord webhook URL not configured. Notifications disabled.")
