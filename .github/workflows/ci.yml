@@ -141,6 +141,7 @@ jobs:
 
       - name: Validate docker-compose files
         run: |
+          cp .env.example .env
           docker compose config --quiet
           docker compose -f docker-compose.prod.yml config --quiet 2>/dev/null || echo "prod compose has optional issues (expected in some envs)"
           echo "✅ docker-compose files are syntactically valid"
