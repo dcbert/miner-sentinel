@@ -52,6 +52,8 @@ collector_settings = {
     'telegram_enabled': False,
     'telegram_bot_token': '',
     'telegram_chat_id': '',
+    'discord_enabled': False,
+    'discord_webhook_url': '',
 }
 
 # Initialize collectors (will load devices from database)
@@ -73,7 +75,8 @@ def load_settings_from_database():
             SELECT polling_interval_minutes, device_check_interval_minutes,
                    pool_type, ckpool_address, ckpool_url,
                    publicpool_address, publicpool_url,
-                   telegram_enabled, telegram_bot_token, telegram_chat_id
+                   telegram_enabled, telegram_bot_token, telegram_chat_id,
+                   discord_enabled, discord_webhook_url
             FROM collector_settings
             WHERE id = 1
         """)
@@ -94,6 +97,15 @@ def load_settings_from_database():
             avalon_collector.update_telegram_settings(telegram_enabled, telegram_bot_token, telegram_chat_id)
 
             logger.info(f"Telegram notifications: {'enabled' if telegram_enabled else 'disabled'}")
+
+            # Update Discord settings in collectors
+            discord_enabled = collector_settings.get('discord_enabled', False)
+            discord_webhook_url = collector_settings.get('discord_webhook_url', '')
+
+            bitaxe_collector.update_discord_settings(discord_enabled, discord_webhook_url)
+            avalon_collector.update_discord_settings(discord_enabled, discord_webhook_url)
+
+            logger.info(f"Discord notifications: {'enabled' if discord_enabled else 'disabled'}")
         else:
             logger.warning("No settings found in database, using defaults")
 

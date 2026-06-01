@@ -72,12 +72,17 @@ export default function SettingsPage() {
     telegram_bot_token: '',
     telegram_chat_id: '',
     telegram_bot_token_configured: false,
+    // Discord notifications
+    discord_enabled: false,
+    discord_webhook_url: '',
+    discord_webhook_url_configured: false,
     // Cost analysis settings
     energy_rate: 0.12,
     energy_currency: 'USD',
     show_revenue_stats: true,
   })
   const [showTelegramToken, setShowTelegramToken] = useState(false)
+  const [showDiscordWebhook, setShowDiscordWebhook] = useState(false)
   const [collectorStatus, setCollectorStatus] = useState(null)
   const [savingSettings, setSavingSettings] = useState(false)
 
@@ -118,12 +123,17 @@ export default function SettingsPage() {
           telegram_bot_token: '', // Never returned from API for security
           telegram_chat_id: collectorRes.data.telegram_chat_id || '',
           telegram_bot_token_configured: collectorRes.data.telegram_bot_token_configured || false,
+          // Discord
+          discord_enabled: collectorRes.data.discord_enabled || false,
+          discord_webhook_url: '', // Never returned from API for security
+          discord_webhook_url_configured: collectorRes.data.discord_webhook_url_configured || false,
           energy_rate: collectorRes.data.energy_rate || 0.12,
           energy_currency: collectorRes.data.energy_currency || 'USD',
           show_revenue_stats: collectorRes.data.show_revenue_stats !== undefined ? collectorRes.data.show_revenue_stats : true,
         })
-        // Reset token visibility when refreshing
+        // Reset token/webhook visibility when refreshing
         setShowTelegramToken(false)
+        setShowDiscordWebhook(false)
       }
     } catch (err) {
       console.error('Error fetching settings data:', err)
@@ -761,6 +771,93 @@ export default function SettingsPage() {
                       />
                       <p className="text-xs text-muted-foreground">
                         Your personal chat ID or group chat ID (use @userinfobot to find it)
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Discord Notifications Settings */}
+              <div className="pt-4 border-t space-y-4">
+                <div className="flex items-center gap-2">
+                  <Bell className="h-4 w-4" />
+                  <Label className="text-base font-medium">Discord Notifications</Label>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="discord_enabled">Enable Discord Alerts</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Receive notifications via Discord webhook when devices go offline or come back online
+                    </p>
+                  </div>
+                  <Switch
+                    id="discord_enabled"
+                    checked={collectorSettings.discord_enabled}
+                    onCheckedChange={(checked) =>
+                      setCollectorSettings({
+                        ...collectorSettings,
+                        discord_enabled: checked,
+                      })
+                    }
+                  />
+                </div>
+
+                {collectorSettings.discord_enabled && (
+                  <div className="grid gap-4 grid-cols-1 pl-3 sm:pl-4 border-l-2 border-muted w-full max-w-full">
+                    <div className="space-y-2 min-w-0 overflow-hidden">
+                      <Label htmlFor="discord_webhook_url">Webhook URL</Label>
+                      {collectorSettings.discord_webhook_url_configured && !showDiscordWebhook ? (
+                        <div className="flex gap-2">
+                          <div className="flex-1 flex items-center px-3 py-2 rounded-md border bg-muted/50">
+                            <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">
+                              <CheckCircle2 className="w-3 h-3 mr-1" />
+                              Configured
+                            </Badge>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => setShowDiscordWebhook(true)}
+                            title="Change webhook URL"
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2">
+                          <Input
+                            id="discord_webhook_url"
+                            type="password"
+                            placeholder="https://discord.com/api/webhooks/..."
+                            value={collectorSettings.discord_webhook_url}
+                            onChange={(e) =>
+                              setCollectorSettings({
+                                ...collectorSettings,
+                                discord_webhook_url: e.target.value,
+                              })
+                            }
+                          />
+                          {collectorSettings.discord_webhook_url_configured && (
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => {
+                                setShowDiscordWebhook(false)
+                                setCollectorSettings({
+                                  ...collectorSettings,
+                                  discord_webhook_url: '',
+                                })
+                              }}
+                              title="Cancel"
+                            >
+                              <EyeOff className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        Create a webhook in your Discord server channel settings (Server Settings → Integrations → Webhooks)
                       </p>
                     </div>
                   </div>

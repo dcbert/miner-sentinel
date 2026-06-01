@@ -7,6 +7,7 @@ from datetime import datetime
 
 import psycopg2
 import requests
+from notifications.discord_notifier import DiscordNotifier
 from notifications.telegram_notifier import TelegramNotifier
 from retrying import retry
 
@@ -20,6 +21,7 @@ class BitAxeCollector:
         self.database_url = database_url
         self.devices = []  # Will be populated from database
         self.telegram_notifier = TelegramNotifier()
+        self.discord_notifier = DiscordNotifier()
 
     def update_telegram_settings(self, enabled, bot_token, chat_id):
         """Update telegram notification settings."""
@@ -30,6 +32,18 @@ class BitAxeCollector:
         else:
             self.telegram_notifier = TelegramNotifier()  # Disabled
             logger.info("Telegram notifier disabled")
+
+    def update_discord_settings(self, enabled, webhook_url):
+        """Update Discord webhook notification settings."""
+        logger.info(f"Updating Discord settings: enabled={enabled}")
+        if enabled:
+            effective_url = webhook_url if webhook_url else None
+            self.discord_notifier = DiscordNotifier(webhook_url=effective_url)
+            logger.info("Discord notifier enabled" if self.discord_notifier.enabled else "Discord notifier disabled (no webhook configured)")
+        else:
+            # Force-disable even if DISCORD_WEBHOOK_URL is set in the environment.
+            self.discord_notifier = DiscordNotifier(webhook_url='')
+            logger.info("Discord notifier disabled")
 
     def update_devices(self, devices):
         """Update the list of devices to monitor from database."""
@@ -67,6 +81,9 @@ class BitAxeCollector:
             self.telegram_notifier.send_device_restart_notification(
                 device_id, device_name
             )
+            self.discord_notifier.send_device_restart_notification(
+                device_id, device_name
+            )
 
             return True
 
@@ -98,6 +115,9 @@ class BitAxeCollector:
 
                     # Send alert notification
                     self.telegram_notifier.send_hashrate_alert(
+                        device_id, device_name, current_hashrate, 3
+                    )
+                    self.discord_notifier.send_hashrate_alert(
                         device_id, device_name, current_hashrate, 3
                     )
 
@@ -145,6 +165,9 @@ class BitAxeCollector:
                     self.telegram_notifier.send_best_difficulty_alert(
                         device_id, device_name, current_best_diff, previous_best
                     )
+                    self.discord_notifier.send_best_difficulty_alert(
+                        device_id, device_name, current_best_diff, previous_best
+                    )
 
         except Exception as e:
             logger.error(f"Error checking best difficulty for {device_id}: {e}")
@@ -189,6 +212,9 @@ class BitAxeCollector:
                 self.telegram_notifier.send_device_offline_alert(
                     device_id, device_name or device_id, last_seen_str, error_message
                 )
+                self.discord_notifier.send_device_offline_alert(
+                    device_id, device_name or device_id, last_seen_str, error_message
+                )
 
             elif not current_status and is_online:
                 # Device came back online
@@ -201,6 +227,9 @@ class BitAxeCollector:
 
                 logger.info(f"Device {device_id} came back online after {duration_str}")
                 self.telegram_notifier.send_device_online_alert(
+                    device_id, device_name or device_id, duration_str
+                )
+                self.discord_notifier.send_device_online_alert(
                     device_id, device_name or device_id, duration_str
                 )
 

@@ -80,6 +80,8 @@ class CollectorSettingsSerializer(serializers.ModelSerializer):
     """Serializer for data collector settings."""
     # Virtual field to indicate if bot token is configured (without exposing the actual token)
     telegram_bot_token_configured = serializers.SerializerMethodField()
+    # Virtual field for Discord webhook (sensitive, don't expose value)
+    discord_webhook_url_configured = serializers.SerializerMethodField()
 
     class Meta:
         model = CollectorSettings
@@ -95,6 +97,9 @@ class CollectorSettingsSerializer(serializers.ModelSerializer):
             'telegram_bot_token',
             'telegram_bot_token_configured',
             'telegram_chat_id',
+            'discord_enabled',
+            'discord_webhook_url',
+            'discord_webhook_url_configured',
             # Cost analysis settings
             'energy_rate',
             'energy_currency',
@@ -111,6 +116,7 @@ class CollectorSettingsSerializer(serializers.ModelSerializer):
             'updated_at',
             'created_at',
             'telegram_bot_token_configured',
+            'discord_webhook_url_configured',
             'cached_btc_price',
             'cached_network_hashrate',
             'cached_network_difficulty',
@@ -118,16 +124,27 @@ class CollectorSettingsSerializer(serializers.ModelSerializer):
         ]
         extra_kwargs = {
             'telegram_bot_token': {'write_only': True},  # Never return the actual token
+            'discord_webhook_url': {'write_only': True},  # Never return the actual webhook URL
         }
 
     def get_telegram_bot_token_configured(self, obj):
         """Return True if a bot token is configured."""
         return bool(obj.telegram_bot_token and obj.telegram_bot_token.strip())
 
+    def get_discord_webhook_url_configured(self, obj):
+        """Return True if a Discord webhook URL is configured."""
+        return bool(obj.discord_webhook_url and obj.discord_webhook_url.strip())
+
     def update(self, instance, validated_data):
-        """Handle telegram_bot_token - only update if a new value is provided."""
+        """Handle sensitive fields - only update if a new value is provided."""
         # If telegram_bot_token is empty string or not provided, keep the existing value
         telegram_bot_token = validated_data.get('telegram_bot_token', None)
         if telegram_bot_token == '' or telegram_bot_token is None:
             validated_data.pop('telegram_bot_token', None)
+
+        # Same for Discord webhook URL
+        discord_webhook_url = validated_data.get('discord_webhook_url', None)
+        if discord_webhook_url == '' or discord_webhook_url is None:
+            validated_data.pop('discord_webhook_url', None)
+
         return super().update(instance, validated_data)

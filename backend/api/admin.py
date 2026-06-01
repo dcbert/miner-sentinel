@@ -103,7 +103,7 @@ class AvalonDeviceAdmin(admin.ModelAdmin):
 @admin.register(CollectorSettings)
 class CollectorSettingsAdmin(admin.ModelAdmin):
     """Admin for data collector settings (singleton)."""
-    list_display = ('pool_type', 'polling_interval_minutes', 'device_check_interval_minutes', 'telegram_enabled', 'updated_at')
+    list_display = ('pool_type', 'polling_interval_minutes', 'device_check_interval_minutes', 'telegram_enabled', 'discord_enabled', 'updated_at')
     readonly_fields = ('created_at', 'updated_at')
 
     fieldsets = (
@@ -126,6 +126,11 @@ class CollectorSettingsAdmin(admin.ModelAdmin):
         }),
         ('Telegram Notifications', {
             'fields': ('telegram_enabled', 'telegram_bot_token', 'telegram_chat_id'),
+            'classes': ('collapse',)
+        }),
+        ('Discord Notifications', {
+            'fields': ('discord_enabled', 'discord_webhook_url'),
+            'description': 'Configure Discord webhook URL to receive alerts for device offline, hashrate issues, and best shares.',
             'classes': ('collapse',)
         }),
         ('Metadata', {
