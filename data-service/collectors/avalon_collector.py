@@ -362,25 +362,30 @@ class AvalonCollector:
             return 0.0
 
     def _parse_power_from_stats(self, stats_info):
-        """Parse power consumption from estats response."""
+        """Parse power consumption from estats response.
+
+        GH-16: Nano 3 (non-3s) reports different PS/MPO layout vs 3s.
+        Reporter: low=60W, mid=80W, full=100W. Previously saw 326W bogus.
+        Prefer MPO (direct watts) when present; fallback to PS last value.
+        """
         try:
-            # Power information is in MM ID0 field: PS[0 0 27541 4 0 3756 133]
-            # The actual power in watts is the LAST value in the PS array
             mm_id0 = stats_info.get('MM ID0', '')
 
-            # Try PS array (last value is power in watts)
+            # Prefer MPO field (often the reliable direct watts value, especially for Nano 3)
+            mpo_match = re.search(r'MPO\[(\d+)\]', mm_id0)
+            if mpo_match:
+                return float(mpo_match.group(1))
+
+            # Fallback: PS array last value (index 6 in 7-element PS[...])
             ps_match = re.search(r'PS\[([^\]]+)\]', mm_id0)
             if ps_match:
                 ps_values = ps_match.group(1).split()
                 if len(ps_values) >= 7:
-                    # Power is the last value (index 6) in watts
                     power_watts = float(ps_values[6])
+                    # Guard against obviously wrong high values for low-power Nano models
+                    if power_watts > 300:
+                        logger.warning(f"Suspicious high power {power_watts}W from PS for device; check model/firmware")
                     return power_watts
-
-            # Fallback: Try MPO field
-            mpo_match = re.search(r'MPO\[(\d+)\]', mm_id0)
-            if mpo_match:
-                return float(mpo_match.group(1))
 
             # Fallback: Try ATA2 array first value
             ata2_match = re.search(r'ATA2\[([^\]]+)\]', mm_id0)
