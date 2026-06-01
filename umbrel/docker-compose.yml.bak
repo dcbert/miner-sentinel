@@ -24,7 +24,7 @@ services:
       retries: 5
 
   backend:
-    image: dcbert/minersentinel-backend:latest@sha256:24d1ab8df5bdc3326ad81c4343e472e34a113d4c31330342f588321acfe54bff
+    image: dcbert/minersentinel-backend:latest@sha256:d5f46aa215f181637e51d529da8a440c7f73ebdf2cf2cee763ca8afc58e20000
     restart: on-failure
     stop_grace_period: 1m
     depends_on:
@@ -57,7 +57,7 @@ services:
       "
 
   frontend:
-    image: dcbert/minersentinel-frontend:latest@sha256:aec17969a4b99362554f3265e58442e216c66e963e87721b55182e242a2d0c16
+    image: dcbert/minersentinel-frontend:latest@sha256:b7ee9a7cc8bf797b45baa7ce56e4bd8a4635ffd085f80aa7ce4ac8832211d62d
     restart: on-failure
     stop_grace_period: 1m
     depends_on:
@@ -66,7 +66,7 @@ services:
       VITE_API_URL: "http://${DEVICE_DOMAIN_NAME}:3080"
 
   data-service:
-    image: dcbert/minersentinel-data-service:latest@sha256:b1a93c2bb54c6cb2092317db52fa852b59d3bcc34c226af426e0dff9aa01cd9d
+    image: dcbert/minersentinel-data-service:latest@sha256:f87bbc9f4e755454718a3eb8190502c7cc65e7d7fb8b40158cf487c26a773f53
     restart: on-failure
     stop_grace_period: 1m
     depends_on:
