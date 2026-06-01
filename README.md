@@ -292,29 +292,10 @@ Portable test runner + coverage for the Python services (data-service + backend)
 
 **Prerequisites (once per environment):**
 ```bash
-# From repo root
-make help
-
 # Install test tooling (kept out of production images)
 cd data-service && pip install -r requirements-dev.txt
 cd ../backend && pip install -r requirements-dev.txt
 cd ..
-```
-
-**Run tests (works from any directory, any machine, CI, containers):**
-```bash
-# All Python services
-make test
-
-# Data-service only (collector logic, parsing, notifications)
-make test-data-service
-
-# Backend only (Django)
-make test-backend
-
-# With coverage (term + HTML reports)
-make test-cov
-make test-data-cov
 ```
 
 The runner:
@@ -323,19 +304,6 @@ The runner:
 - All `data-service/tests/*.py` now use **portable** `Path(__file__).parent.parent` (no more `/Users/davidebert/...` hardcodes).
 - Coverage targets the real source packages (collectors/, api/, etc.).
 - Artifacts (`.pytest_cache/`, `.coverage`, `htmlcov*/`) ignored in git and cleaned via `make clean`.
-
-**Example output (after `make test-data-cov`):**
-- `htmlcov-data-service/index.html` for collector coverage drilldown.
-- Terminal missing-lines report.
-
-Frontend tests remain `cd frontend && npm test` (Vitest/Jest via package.json).
-
-See:
-- `Makefile` (the portable entrypoint)
-- `pyproject.toml` (pytest/coverage options)
-- `data-service/requirements-dev.txt`, `backend/requirements-dev.txt`
-- `data-service/tests/` (now runnable anywhere)
-- `backend/tests/` (new baseline Django smoke tests)
 
 ---
 

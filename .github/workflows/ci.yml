@@ -1,11 +1,6 @@
 # GitHub Actions CI for MinerSentinel
 # Runs tests for Frontend (Vitest), Backend (Django + pytest), and Data Service (pytest)
 #
-# Design note:
-# We call pytest directly (instead of `make test-*`) for transparency and to stay
-# consistent with the existing .gitlab-ci.yml, which also invokes pytest directly.
-# The Makefile remains the recommended way to run tests *locally* for developers.
-
 name: CI
 
 on:
