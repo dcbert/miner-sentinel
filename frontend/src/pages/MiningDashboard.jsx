@@ -642,13 +642,6 @@ export default function MiningDashboard() {
                       className="text-xs"
                       axisLine={false}
                       tickLine={false}
-                      tickFormatter={(value) => {
-                        try {
-                          return new Date(value).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-                        } catch {
-                          return value
-                        }
-                      }}
                     />
                     <YAxis
                       tickFormatter={formatYAxisHashrate}
