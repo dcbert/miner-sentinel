@@ -1,0 +1,200 @@
+# GitHub Actions workflow to replace build_and_push_for_umbrel.sh
+#
+# Purpose:
+#   - Build multi-architecture Docker images (amd64 + arm64) for Umbrel
+#   - Push them to Docker Hub with :latest and :vX.Y.Z tags
+#   - Update umbrel/docker-compose.yml with new image digests (pinned by digest for security/reproducibility)
+#   - Open a Pull Request with the changes
+#
+
+name: Build & Push for Umbrel
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to publish (e.g. v1.0.3)'
+        required: true
+        default: 'v1.0.3'
+
+env:
+  DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+  # Fallback to original hardcoded user if secret is not set
+  DOCKER_HUB_USER: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_USERNAME || 'dcbert' }}
+
+jobs:
+  build-and-push:
+    name: Build & Push Multi-Arch Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up QEMU (for multi-arch)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.DOCKER_HUB_USER }}/minersentinel-backend:latest
+            ${{ env.DOCKER_HUB_USER }}/minersentinel-backend:${{ inputs.version }}
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.DOCKER_HUB_USER }}/minersentinel-frontend:latest
+            ${{ env.DOCKER_HUB_USER }}/minersentinel-frontend:${{ inputs.version }}
+
+      - name: Build and push data-service
+        uses: docker/build-push-action@v6
+        with:
+          context: ./data-service
+          file: ./data-service/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.DOCKER_HUB_USER }}/minersentinel-data-service:latest
+            ${{ env.DOCKER_HUB_USER }}/minersentinel-data-service:${{ inputs.version }}
+
+      - name: Get image digests
+        id: digests
+        run: |
+          echo "Fetching digests for version ${{ inputs.version }}..."
+
+          BACKEND_DIGEST=$(docker buildx imagetools inspect ${{ env.DOCKER_HUB_USER }}/minersentinel-backend:latest --format '{{json .Manifest.Digest}}' | tr -d '"')
+          FRONTEND_DIGEST=$(docker buildx imagetools inspect ${{ env.DOCKER_HUB_USER }}/minersentinel-frontend:latest --format '{{json .Manifest.Digest}}' | tr -d '"')
+          DATA_SERVICE_DIGEST=$(docker buildx imagetools inspect ${{ env.DOCKER_HUB_USER }}/minersentinel-data-service:latest --format '{{json .Manifest.Digest}}' | tr -d '"')
+
+          echo "backend_digest=$BACKEND_DIGEST" >> $GITHUB_OUTPUT
+          echo "frontend_digest=$FRONTEND_DIGEST" >> $GITHUB_OUTPUT
+          echo "data_service_digest=$DATA_SERVICE_DIGEST" >> $GITHUB_OUTPUT
+
+          echo "Backend:    $BACKEND_DIGEST"
+          echo "Frontend:   $FRONTEND_DIGEST"
+          echo "Data-service: $DATA_SERVICE_DIGEST"
+
+      - name: Update umbrel/docker-compose.yml with new digests
+        env:
+          DOCKER_HUB_USER: ${{ env.DOCKER_HUB_USER }}
+          BACKEND_DIGEST: ${{ steps.digests.outputs.backend_digest }}
+          FRONTEND_DIGEST: ${{ steps.digests.outputs.frontend_digest }}
+          DATA_SERVICE_DIGEST: ${{ steps.digests.outputs.data_service_digest }}
+        run: |
+          echo "Updating umbrel/docker-compose.yml..."
+
+          # Create backup
+          cp umbrel/docker-compose.yml umbrel/docker-compose.yml.bak
+
+          # Use Python for reliable cross-platform replacement (more robust than sed)
+          python3 - << 'PYEOF'
+          import re
+          import os
+
+          user = os.environ["DOCKER_HUB_USER"]
+          backend = os.environ["BACKEND_DIGEST"]
+          frontend = os.environ["FRONTEND_DIGEST"]
+          data = os.environ["DATA_SERVICE_DIGEST"]
+
+          with open('umbrel/docker-compose.yml', 'r') as f:
+              content = f.read()
+
+          # Update backend
+          content = re.sub(
+              rf'(image: {user}/minersentinel-backend:).*@sha256:[a-f0-9]+',
+              rf'\1latest@{backend}',
+              content
+          )
+          # Update frontend
+          content = re.sub(
+              rf'(image: {user}/minersentinel-frontend:).*@sha256:[a-f0-9]+',
+              rf'\1latest@{frontend}',
+              content
+          )
+          # Update data-service
+          content = re.sub(
+              rf'(image: {user}/minersentinel-data-service:).*@sha256:[a-f0-9]+',
+              rf'\1latest@{data}',
+              content
+          )
+
+          with open('umbrel/docker-compose.yml', 'w') as f:
+              f.write(content)
+
+          print("✓ umbrel/docker-compose.yml updated successfully")
+          PYEOF
+
+      - name: Create Pull Request with updated Umbrel compose
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: |
+            chore(umbrel): update images to ${{ inputs.version }}
+
+            Updated pinned image digests in umbrel/docker-compose.yml
+          title: "chore(umbrel): update images to ${{ inputs.version }}"
+          body: |
+            ## Umbrel Image Update
+
+            This PR updates the Umbrel app's `docker-compose.yml` with newly built multi-arch images.
+
+            **Version:** `${{ inputs.version }}`
+
+            **New image digests:**
+            - `backend`: `${{ steps.digests.outputs.backend_digest }}`
+            - `frontend`: `${{ steps.digests.outputs.frontend_digest }}`
+            - `data-service`: `${{ steps.digests.outputs.data_service_digest }}`
+
+            Images were built for `linux/amd64` and `linux/arm64` and pushed to Docker Hub.
+
+            ---
+            **Review checklist:**
+            - [ ] Verify the new digests look correct
+            - [ ] Test the Umbrel app locally if possible
+
+            After merging, Umbrel users will receive the updated version on next app refresh.
+          branch: update-umbrel-images-${{ inputs.version }}
+          base: main
+          labels: |
+            umbrel
+            automated
+          delete-branch: true
+          draft: false
+
+      - name: Summary
+        run: |
+          echo "## ✅ Umbrel Deployment Pipeline Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** \`${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker Hub User:** \`${{ env.DOCKER_HUB_USER }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### New Digests" >> $GITHUB_STEP_SUMMARY
+          echo "- Backend: \`${{ steps.digests.outputs.backend_digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Frontend: \`${{ steps.digests.outputs.frontend_digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Data Service: \`${{ steps.digests.outputs.data_service_digest }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "A Pull Request was created with the updated \`umbrel/docker-compose.yml\`." >> $GITHUB_STEP_SUMMARY
