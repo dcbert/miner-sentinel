@@ -18,6 +18,7 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
+import { makeLabel, unwrapList } from '@/lib/devices';
 import {
   AlertCircle,
   Bell,
@@ -37,10 +38,14 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+const SUPPORTED_MAKES = [
+  { value: 'bitaxe', label: 'Bitaxe' },
+  { value: 'avalon', label: 'Avalon' },
+]
+
 export default function SettingsPage() {
-  // Device management
-  const [bitaxeDevices, setBitaxeDevices] = useState([])
-  const [avalonDevices, setAvalonDevices] = useState([])
+  // Device management (unified registry)
+  const [devices, setDevices] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
@@ -48,13 +53,13 @@ export default function SettingsPage() {
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogMode, setDialogMode] = useState('add') // 'add' or 'edit'
-  const [dialogDeviceType, setDialogDeviceType] = useState('bitaxe')
   const [currentDevice, setCurrentDevice] = useState(null)
 
   // Form state
   const [formData, setFormData] = useState({
     device_id: '',
     device_name: '',
+    make: 'bitaxe',
     ip_address: '',
     is_active: true,
   })
@@ -100,14 +105,12 @@ export default function SettingsPage() {
       setLoading(true)
       setError(null)
 
-      const [bitaxeRes, avalonRes, collectorRes] = await Promise.all([
-        api.get('/api/bitaxe/devices/').catch(() => ({ data: { results: [] } })),
-        api.get('/api/avalon/devices/').catch(() => ({ data: [] })),
+      const [devicesRes, collectorRes] = await Promise.all([
+        api.get('/api/devices/').catch(() => ({ data: { results: [] } })),
         api.get('/api/settings/collector/').catch(() => ({ data: null })),
       ])
 
-      setBitaxeDevices(bitaxeRes.data.results || bitaxeRes.data || [])
-      setAvalonDevices(avalonRes.data.results || avalonRes.data || [])
+      setDevices(unwrapList(devicesRes.data))
 
       if (collectorRes.data) {
         setCollectorStatus(collectorRes.data)
@@ -143,25 +146,26 @@ export default function SettingsPage() {
     }
   }
 
-  const openAddDialog = (deviceType) => {
+  const openAddDialog = () => {
     setDialogMode('add')
-    setDialogDeviceType(deviceType)
+    setCurrentDevice(null)
     setFormData({
       device_id: '',
       device_name: '',
+      make: 'bitaxe',
       ip_address: '',
       is_active: true,
     })
     setDialogOpen(true)
   }
 
-  const openEditDialog = (device, deviceType) => {
+  const openEditDialog = (device) => {
     setDialogMode('edit')
-    setDialogDeviceType(deviceType)
     setCurrentDevice(device)
     setFormData({
       device_id: device.device_id,
       device_name: device.device_name,
+      make: device.make || 'bitaxe',
       ip_address: device.ip_address,
       is_active: device.is_active,
     })
@@ -171,43 +175,49 @@ export default function SettingsPage() {
   const handleSaveDevice = async () => {
     try {
       setError(null)
-      const endpoint = dialogDeviceType === 'bitaxe' ? '/api/bitaxe/devices' : '/api/avalon/devices'
+      const payload = {
+        device_id: formData.device_id,
+        device_name: formData.device_name,
+        make: formData.make,
+        ip_address: formData.ip_address,
+        is_active: formData.is_active,
+      }
 
       if (dialogMode === 'add') {
-        await api.post(`${endpoint}/`, formData)
-        setSuccess(`${dialogDeviceType === 'bitaxe' ? 'Bitaxe' : 'Avalon'} device added successfully`)
+        await api.post('/api/devices/', payload)
+        setSuccess(`${makeLabel(formData.make)} device added successfully`)
       } else {
-        await api.put(`${endpoint}/${currentDevice.device_id}/`, formData)
-        setSuccess(`${dialogDeviceType === 'bitaxe' ? 'Bitaxe' : 'Avalon'} device updated successfully`)
+        await api.patch(`/api/devices/${currentDevice.id}/`, payload)
+        setSuccess(`${makeLabel(formData.make)} device updated successfully`)
       }
 
       setDialogOpen(false)
       fetchData()
-
-      // Clear success message after 3 seconds
       setTimeout(() => setSuccess(null), 3000)
     } catch (err) {
       console.error('Error saving device:', err)
-      setError(err.response?.data?.detail || 'Failed to save device')
+      const detail =
+        err.response?.data?.detail ||
+        err.response?.data?.device_id?.[0] ||
+        (typeof err.response?.data === 'object' ? JSON.stringify(err.response.data) : null) ||
+        'Failed to save device'
+      setError(detail)
     }
   }
 
-  const openDeleteDialog = (device, deviceType) => {
-    setDeviceToDelete({ ...device, deviceType })
+  const openDeleteDialog = (device) => {
+    setDeviceToDelete(device)
     setDeleteDialogOpen(true)
   }
 
   const handleDeleteDevice = async () => {
     try {
       setError(null)
-      const endpoint = deviceToDelete.deviceType === 'bitaxe' ? '/api/bitaxe/devices' : '/api/avalon/devices'
-      await api.delete(`${endpoint}/${deviceToDelete.device_id}/`)
-
-      setSuccess(`${deviceToDelete.deviceType === 'bitaxe' ? 'Bitaxe' : 'Avalon'} device deleted successfully`)
+      await api.delete(`/api/devices/${deviceToDelete.id}/`)
+      setSuccess(`${makeLabel(deviceToDelete.make)} device deleted successfully`)
       setDeleteDialogOpen(false)
       setDeviceToDelete(null)
       fetchData()
-
       setTimeout(() => setSuccess(null), 3000)
     } catch (err) {
       console.error('Error deleting device:', err)
@@ -257,12 +267,13 @@ export default function SettingsPage() {
     return date.toLocaleDateString()
   }
 
-  const DeviceTable = ({ devices, deviceType }) => (
+  const DeviceTable = ({ devices: rows }) => (
     <div className="overflow-x-auto sm:mx-0">
-      <Table className="min-w-[600px]">
+      <Table className="min-w-[700px]">
         <TableHeader>
           <TableRow>
             <TableHead>Device Name</TableHead>
+            <TableHead>Make</TableHead>
             <TableHead className="hidden sm:table-cell">Device ID</TableHead>
             <TableHead>IP Address</TableHead>
             <TableHead>Status</TableHead>
@@ -271,16 +282,15 @@ export default function SettingsPage() {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {devices.length === 0 ? (
+          {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                No {deviceType === 'bitaxe' ? 'Bitaxe' : 'Avalon'} devices configured.
-                Click "Add Device" to get started.
+              <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                No devices configured. Click &quot;Add Device&quot; to get started.
               </TableCell>
             </TableRow>
           ) : (
-            devices.map((device) => (
-              <TableRow key={device.id}>
+            rows.map((device) => (
+              <TableRow key={`${device.make}-${device.device_id}`}>
                 <TableCell className="font-medium">
                   <div>
                     {device.device_name}
@@ -288,6 +298,9 @@ export default function SettingsPage() {
                       {device.device_id}
                     </span>
                   </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant="outline">{makeLabel(device.make)}</Badge>
                 </TableCell>
                 <TableCell className="font-mono text-sm hidden sm:table-cell">{device.device_id}</TableCell>
                 <TableCell className="font-mono text-xs sm:text-sm">{device.ip_address}</TableCell>
@@ -320,7 +333,7 @@ export default function SettingsPage() {
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8"
-                    onClick={() => openEditDialog(device, deviceType)}
+                    onClick={() => openEditDialog(device)}
                   >
                     <Edit className="h-4 w-4" />
                   </Button>
@@ -328,7 +341,7 @@ export default function SettingsPage() {
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 text-destructive hover:text-destructive"
-                    onClick={() => openDeleteDialog(device, deviceType)}
+                    onClick={() => openDeleteDialog(device)}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -401,47 +414,24 @@ export default function SettingsPage() {
 
         {/* Devices Tab */}
         <TabsContent value="devices" className="space-y-4 sm:space-y-6">
-          {/* Bitaxe Devices */}
           <Card>
             <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
                   <Cpu className="h-4 w-4 sm:h-5 sm:w-5" />
-                  Bitaxe Devices
+                  Mining Devices
                 </CardTitle>
                 <CardDescription className="text-xs sm:text-sm">
-                  Manage your Bitaxe mining devices
+                  All miner makes in one registry ({devices.length} device{devices.length !== 1 ? 's' : ''})
                 </CardDescription>
               </div>
-              <Button onClick={() => openAddDialog('bitaxe')} className="w-full sm:w-auto">
+              <Button onClick={openAddDialog} className="w-full sm:w-auto">
                 <Plus className="h-4 w-4 mr-2" />
                 Add Device
               </Button>
             </CardHeader>
             <CardContent className="px-2 sm:px-6">
-              <DeviceTable devices={bitaxeDevices} deviceType="bitaxe" />
-            </CardContent>
-          </Card>
-
-          {/* Avalon Devices */}
-          <Card>
-            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-                  <Cpu className="h-4 w-4 sm:h-5 sm:w-5" />
-                  Avalon Devices
-                </CardTitle>
-                <CardDescription className="text-xs sm:text-sm">
-                  Manage your Avalon Nano 3s mining devices
-                </CardDescription>
-              </div>
-              <Button onClick={() => openAddDialog('avalon')} className="w-full sm:w-auto">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Device
-              </Button>
-            </CardHeader>
-            <CardContent className="px-2 sm:px-6">
-              <DeviceTable devices={avalonDevices} deviceType="avalon" />
+              <DeviceTable devices={devices} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -475,7 +465,9 @@ export default function SettingsPage() {
                 )}
                 <div className="flex items-center gap-2 text-muted-foreground text-xs sm:text-sm">
                   <Cpu className="w-4 h-4" />
-                  {bitaxeDevices.length} Bitaxe, {avalonDevices.length} Avalon devices
+                  {devices.filter((d) => d.make === 'bitaxe').length} Bitaxe,{' '}
+                  {devices.filter((d) => d.make === 'avalon').length} Avalon
+                  {' '}({devices.length} total)
                 </div>
               </div>
 
@@ -960,27 +952,44 @@ export default function SettingsPage() {
         <DialogContent onClose={() => setDialogOpen(false)}>
           <DialogHeader>
             <DialogTitle>
-              {dialogMode === 'add' ? 'Add' : 'Edit'} {dialogDeviceType === 'bitaxe' ? 'Bitaxe' : 'Avalon'} Device
+              {dialogMode === 'add' ? 'Add Device' : 'Edit Device'}
             </DialogTitle>
             <DialogDescription>
               {dialogMode === 'add'
-                ? 'Enter the details for the new device.'
+                ? 'Choose the miner make and enter connection details.'
                 : 'Update the device configuration.'}
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
+              <Label htmlFor="make">Make</Label>
+              <Select
+                id="make"
+                value={formData.make}
+                onValueChange={(value) => setFormData({ ...formData, make: value })}
+                disabled={dialogMode === 'edit'}
+              >
+                {SUPPORTED_MAKES.map((m) => (
+                  <SelectOption key={m.value} value={m.value}>{m.label}</SelectOption>
+                ))}
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Manufacturer / firmware family (more makes can be added later)
+              </p>
+            </div>
+
+            <div className="grid gap-2">
               <Label htmlFor="device_id">Device ID</Label>
               <Input
                 id="device_id"
-                placeholder="e.g., bitaxe-001 or avalon-001"
+                placeholder="e.g., bitaxe-001 or living-room"
                 value={formData.device_id}
                 onChange={(e) => setFormData({ ...formData, device_id: e.target.value })}
                 disabled={dialogMode === 'edit'}
               />
               <p className="text-xs text-muted-foreground">
-                Unique identifier for this device
+                Unique identifier for this device within its make
               </p>
             </div>
 
@@ -1006,7 +1015,7 @@ export default function SettingsPage() {
                 onChange={(e) => setFormData({ ...formData, ip_address: e.target.value })}
               />
               <p className="text-xs text-muted-foreground">
-                The device's local network IP address
+                The device&apos;s local network IP address
               </p>
             </div>
 

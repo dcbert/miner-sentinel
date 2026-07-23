@@ -1,27 +1,25 @@
 """
-Avalon Nano 3s API views for Django REST Framework
+Avalon Nano 3s API views — registry dual-writes, stats read from unified tables.
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
-import pandas as pd
-from django.db.models import Avg, Count, Max, Sum
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .avalon_serializers import (
-    AvalonDashboardStatsSerializer,
-    AvalonDeviceDetailSerializer,
-    AvalonDeviceSerializer,
-    AvalonHardwareLogsSerializer,
-    AvalonMiningStatsSerializer,
-    AvalonSystemInfoSerializer,
+from .avalon_serializers import AvalonDeviceSerializer
+from .device_sync import delete_unified_device, sync_avalon_to_unified
+from .models import AvalonDevice, Device, DeviceHardwareStats, DeviceMiningStats, DeviceSystemInfo
+from .unified_serializers import (
+    UnifiedDeviceAsAvalonSerializer,
+    UnifiedHardwareSerializer,
+    UnifiedMiningAsAvalonSerializer,
+    UnifiedSystemAsAvalonSerializer,
 )
-from .models import AvalonDevice, AvalonHardwareLogs, AvalonMiningStats, AvalonSystemInfo
 
 logger = logging.getLogger(__name__)
 
@@ -29,41 +27,61 @@ logger = logging.getLogger(__name__)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def avalon_dashboard_stats(request):
-    """
-    Get Avalon dashboard statistics including device status and aggregated metrics.
-    """
+    """Get Avalon dashboard statistics from unified tables."""
     try:
-        # Get all devices with their latest data
-        devices = AvalonDevice.objects.all()
-
-        # Count devices by status
+        devices = Device.objects.filter(make=Device.MAKE_AVALON)
         total_devices = devices.count()
         online_devices = devices.filter(is_active=True).count()
         offline_devices = total_devices - online_devices
 
-        # Get latest mining stats for aggregation
         latest_stats = []
         latest_hardware = []
-
         for device in devices:
-            latest_mining = device.mining_stats.first()
-            latest_hw = device.hardware_logs.first()
-
+            latest_mining = DeviceMiningStats.objects.filter(device=device).first()
+            latest_hw = DeviceHardwareStats.objects.filter(device=device).first()
             if latest_mining:
                 latest_stats.append(latest_mining)
             if latest_hw:
                 latest_hardware.append(latest_hw)
 
-        # Calculate aggregated metrics
-        total_hashrate = sum(stat.hashrate_ghs for stat in latest_stats)
-        avg_temperature = sum(hw.temperature_c for hw in latest_hardware) / len(latest_hardware) if latest_hardware else 0
-        total_power = sum(hw.power_watts for hw in latest_hardware)
-        avg_efficiency = sum(hw.efficiency_j_per_th for hw in latest_hardware) / len(latest_hardware) if latest_hardware else 0
-        total_accepted = sum(stat.shares_accepted for stat in latest_stats)
-        total_rejected = sum(stat.shares_rejected for stat in latest_stats)
+        total_hashrate = sum(stat.hashrate_ghs or 0 for stat in latest_stats)
+        avg_temperature = (
+            sum(hw.temperature_c or 0 for hw in latest_hardware) / len(latest_hardware)
+            if latest_hardware else 0
+        )
+        total_power = sum(hw.power_watts or 0 for hw in latest_hardware)
+        avg_efficiency = (
+            sum(hw.efficiency_j_per_th or 0 for hw in latest_hardware) / len(latest_hardware)
+            if latest_hardware else 0
+        )
+        total_accepted = sum(stat.shares_accepted or 0 for stat in latest_stats)
+        total_rejected = sum(stat.shares_rejected or 0 for stat in latest_stats)
 
-        # Prepare response data
-        dashboard_data = {
+        device_payloads = []
+        for device in devices:
+            device_payloads.append({
+                **UnifiedDeviceAsAvalonSerializer(device).data,
+                'latest_mining_stats': (
+                    UnifiedMiningAsAvalonSerializer(
+                        DeviceMiningStats.objects.filter(device=device).first()
+                    ).data
+                    if DeviceMiningStats.objects.filter(device=device).exists() else None
+                ),
+                'latest_hardware_logs': (
+                    UnifiedHardwareSerializer(
+                        DeviceHardwareStats.objects.filter(device=device).first()
+                    ).data
+                    if DeviceHardwareStats.objects.filter(device=device).exists() else None
+                ),
+                'latest_system_info': (
+                    UnifiedSystemAsAvalonSerializer(
+                        DeviceSystemInfo.objects.filter(device=device).first()
+                    ).data
+                    if DeviceSystemInfo.objects.filter(device=device).exists() else None
+                ),
+            })
+
+        return Response({
             'total_devices': total_devices,
             'online_devices': online_devices,
             'offline_devices': offline_devices,
@@ -73,37 +91,34 @@ def avalon_dashboard_stats(request):
             'average_efficiency': avg_efficiency,
             'total_shares_accepted': total_accepted,
             'total_shares_rejected': total_rejected,
-            'devices': devices
-        }
-
-        serializer = AvalonDashboardStatsSerializer(dashboard_data)
-        return Response(serializer.data)
-
+            'devices': device_payloads,
+        })
     except Exception as e:
         logger.error(f"Error getting Avalon dashboard stats: {e}", exc_info=True)
         return Response(
             {'error': 'Failed to get dashboard statistics'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
 @api_view(['GET', 'POST'])
 @permission_classes([IsAuthenticated])
 def avalon_devices(request):
-    """
-    GET: Get list of all Avalon devices.
-    POST: Create a new Avalon device.
-    """
+    """GET list / POST create Avalon devices (legacy + unified registry)."""
     try:
         if request.method == 'GET':
-            devices = AvalonDevice.objects.all().order_by('device_id')
-            serializer = AvalonDeviceSerializer(devices, many=True)
-            return Response(serializer.data)
+            # Prefer unified registry
+            devices = Device.objects.filter(make=Device.MAKE_AVALON).order_by('device_id')
+            if devices.exists():
+                return Response(UnifiedDeviceAsAvalonSerializer(devices, many=True).data)
+            legacy = AvalonDevice.objects.all().order_by('device_id')
+            return Response(AvalonDeviceSerializer(legacy, many=True).data)
 
         elif request.method == 'POST':
             serializer = AvalonDeviceSerializer(data=request.data)
             if serializer.is_valid():
-                serializer.save()
+                instance = serializer.save()
+                sync_avalon_to_unified(instance)
                 return Response(serializer.data, status=status.HTTP_201_CREATED)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -111,292 +126,217 @@ def avalon_devices(request):
         logger.error(f"Error with Avalon devices: {e}", exc_info=True)
         return Response(
             {'error': 'Failed to process device request'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
 @api_view(['GET', 'PUT', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def avalon_device_detail(request, device_id):
-    """
-    GET: Get detailed information for a specific Avalon device.
-    PUT: Update an Avalon device.
-    DELETE: Delete an Avalon device.
-    """
+    """GET / PUT / DELETE a single Avalon device."""
     try:
-        # Try to find by device_id first, then by pk (id)
+        unified = Device.objects.filter(make=Device.MAKE_AVALON, device_id=device_id).first()
         try:
-            device = AvalonDevice.objects.get(device_id=device_id)
+            legacy = AvalonDevice.objects.get(device_id=device_id)
         except AvalonDevice.DoesNotExist:
             try:
-                device = AvalonDevice.objects.get(pk=int(device_id))
+                legacy = AvalonDevice.objects.get(pk=int(device_id))
             except (AvalonDevice.DoesNotExist, ValueError):
-                return Response(
-                    {'error': 'Device not found'},
-                    status=status.HTTP_404_NOT_FOUND
-                )
+                legacy = None
 
         if request.method == 'GET':
-            serializer = AvalonDeviceDetailSerializer(device)
-            return Response(serializer.data)
+            if unified:
+                payload = UnifiedDeviceAsAvalonSerializer(unified).data
+                payload['latest_mining_stats'] = None
+                payload['latest_hardware_logs'] = None
+                payload['latest_system_info'] = None
+                m = DeviceMiningStats.objects.filter(device=unified).first()
+                h = DeviceHardwareStats.objects.filter(device=unified).first()
+                s = DeviceSystemInfo.objects.filter(device=unified).first()
+                if m:
+                    payload['latest_mining_stats'] = UnifiedMiningAsAvalonSerializer(m).data
+                if h:
+                    payload['latest_hardware_logs'] = UnifiedHardwareSerializer(h).data
+                if s:
+                    payload['latest_system_info'] = UnifiedSystemAsAvalonSerializer(s).data
+                return Response(payload)
+            if legacy:
+                return Response(AvalonDeviceSerializer(legacy).data)
+            return Response({'error': 'Device not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        elif request.method == 'PUT':
-            serializer = AvalonDeviceSerializer(device, data=request.data, partial=True)
+        if not legacy:
+            return Response({'error': 'Device not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if request.method == 'PUT':
+            serializer = AvalonDeviceSerializer(legacy, data=request.data, partial=True)
             if serializer.is_valid():
-                serializer.save()
+                instance = serializer.save()
+                sync_avalon_to_unified(instance)
                 return Response(serializer.data)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         elif request.method == 'DELETE':
-            device.delete()
+            device_id_value = legacy.device_id
+            legacy.delete()
+            delete_unified_device(Device.MAKE_AVALON, device_id_value)
             return Response(status=status.HTTP_204_NO_CONTENT)
 
     except Exception as e:
         logger.error(f"Error with Avalon device detail: {e}", exc_info=True)
         return Response(
             {'error': 'Failed to process device request'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def avalon_mining_stats(request):
-    """
-    Get mining statistics for all Avalon devices.
-
-    Query parameters:
-    - device_id: Filter by specific device
-    - hours: Number of hours to look back (default: 24)
-    - limit: Maximum number of records (default: 100)
-    """
+    """Mining statistics for Avalon devices from unified tables."""
     try:
         device_id = request.GET.get('device_id')
         hours = int(request.GET.get('hours', 24))
         limit = int(request.GET.get('limit', 100))
-
-        # Calculate time range
         end_time = timezone.now()
         start_time = end_time - timedelta(hours=hours)
 
-        # Build query
-        query = AvalonMiningStats.objects.filter(
+        query = DeviceMiningStats.objects.filter(
+            device__make=Device.MAKE_AVALON,
             recorded_at__gte=start_time,
-            recorded_at__lte=end_time
-        )
-
+            recorded_at__lte=end_time,
+        ).select_related('device')
         if device_id:
             query = query.filter(device__device_id=device_id)
-
         stats = query.order_by('-recorded_at')[:limit]
-        serializer = AvalonMiningStatsSerializer(stats, many=True)
-        return Response(serializer.data)
-
+        return Response(UnifiedMiningAsAvalonSerializer(stats, many=True).data)
     except Exception as e:
         logger.error(f"Error getting Avalon mining stats: {e}", exc_info=True)
         return Response(
             {'error': 'Failed to get mining statistics'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def avalon_hardware_logs(request):
-    """
-    Get hardware monitoring logs for all Avalon devices.
-
-    Query parameters:
-    - device_id: Filter by specific device
-    - hours: Number of hours to look back (default: 24)
-    - limit: Maximum number of records (default: 100)
-    """
+    """Hardware logs for Avalon devices from unified tables."""
     try:
         device_id = request.GET.get('device_id')
         hours = int(request.GET.get('hours', 24))
         limit = int(request.GET.get('limit', 100))
-
-        # Calculate time range
         end_time = timezone.now()
         start_time = end_time - timedelta(hours=hours)
 
-        # Build query
-        query = AvalonHardwareLogs.objects.filter(
+        query = DeviceHardwareStats.objects.filter(
+            device__make=Device.MAKE_AVALON,
             recorded_at__gte=start_time,
-            recorded_at__lte=end_time
-        )
-
+            recorded_at__lte=end_time,
+        ).select_related('device')
         if device_id:
             query = query.filter(device__device_id=device_id)
-
         logs = query.order_by('-recorded_at')[:limit]
-        serializer = AvalonHardwareLogsSerializer(logs, many=True)
-        return Response(serializer.data)
-
+        return Response(UnifiedHardwareSerializer(logs, many=True).data)
     except Exception as e:
         logger.error(f"Error getting Avalon hardware logs: {e}", exc_info=True)
         return Response(
             {'error': 'Failed to get hardware logs'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def avalon_hashrate_trends(request):
-    """
-    Get hashrate trends for Avalon devices over time.
-
-    Query parameters:
-    - device_id: Filter by specific device
-    - hours: Number of hours to look back (default: 24)
-    - interval: Grouping interval in minutes (default: 60)
-    """
+    """Hashrate trend points for Avalon devices."""
     try:
         device_id = request.GET.get('device_id')
         hours = int(request.GET.get('hours', 24))
-        interval = int(request.GET.get('interval', 60))
-
-        # Calculate time range
-        end_time = timezone.now()
-        start_time = end_time - timedelta(hours=hours)
-
-        # Build query
-        query = AvalonMiningStats.objects.filter(
+        start_time = timezone.now() - timedelta(hours=hours)
+        query = DeviceMiningStats.objects.filter(
+            device__make=Device.MAKE_AVALON,
             recorded_at__gte=start_time,
-            recorded_at__lte=end_time
         )
-
         if device_id:
             query = query.filter(device__device_id=device_id)
-
-        # Get data and convert to DataFrame for easier processing
         stats = query.order_by('recorded_at').values(
-            'recorded_at', 'hashrate_ghs', 'device__device_id', 'device__device_name'
+            'recorded_at', 'hashrate_ghs', 'shares_accepted', 'shares_rejected', 'device__name'
         )
-
-        if not stats:
-            return Response([])
-
-        df = pd.DataFrame(stats)
-        df['recorded_at'] = pd.to_datetime(df['recorded_at'])
-
-        # Group by time intervals
-        df.set_index('recorded_at', inplace=True)
-        grouped = df.groupby([
-            pd.Grouper(freq=f'{interval}min'),
-            'device__device_id'
-        ]).agg({
-            'hashrate_ghs': 'mean',
-            'device__device_name': 'first'
-        }).reset_index()
-
-        # Format response
-        trends = []
-        for _, row in grouped.iterrows():
-            trends.append({
-                'timestamp': row['recorded_at'].isoformat(),
-                'device_id': row['device__device_id'],
-                'device_name': row['device__device_name'],
-                'hashrate_ghs': round(row['hashrate_ghs'], 2)
-            })
-
-        return Response(trends)
-
+        return Response([
+            {
+                'recorded_at': row['recorded_at'],
+                'hashrate_ghs': row['hashrate_ghs'],
+                'shares_accepted': row['shares_accepted'],
+                'shares_rejected': row['shares_rejected'],
+                'device_name': row['device__name'],
+            }
+            for row in stats
+        ])
     except Exception as e:
         logger.error(f"Error getting Avalon hashrate trends: {e}", exc_info=True)
         return Response(
             {'error': 'Failed to get hashrate trends'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def avalon_temperature_trends(request):
-    """
-    Get temperature trends for Avalon devices over time.
-    """
+    """Temperature / power trends for Avalon devices."""
     try:
         device_id = request.GET.get('device_id')
         hours = int(request.GET.get('hours', 24))
-        interval = int(request.GET.get('interval', 60))
-
-        # Calculate time range
-        end_time = timezone.now()
-        start_time = end_time - timedelta(hours=hours)
-
-        # Build query
-        query = AvalonHardwareLogs.objects.filter(
+        start_time = timezone.now() - timedelta(hours=hours)
+        query = DeviceHardwareStats.objects.filter(
+            device__make=Device.MAKE_AVALON,
             recorded_at__gte=start_time,
-            recorded_at__lte=end_time
         )
-
         if device_id:
             query = query.filter(device__device_id=device_id)
-
-        # Get data and convert to DataFrame
         logs = query.order_by('recorded_at').values(
-            'recorded_at', 'temperature_c', 'power_watts',
-            'device__device_id', 'device__device_name'
+            'recorded_at', 'temperature_c', 'power_watts', 'fan_speed_rpm', 'device__name'
         )
-
-        if not logs:
-            return Response([])
-
-        df = pd.DataFrame(logs)
-        df['recorded_at'] = pd.to_datetime(df['recorded_at'])
-
-        # Group by time intervals
-        df.set_index('recorded_at', inplace=True)
-        grouped = df.groupby([
-            pd.Grouper(freq=f'{interval}min'),
-            'device__device_id'
-        ]).agg({
-            'temperature_c': 'mean',
-            'power_watts': 'mean',
-            'device__device_name': 'first'
-        }).reset_index()
-
-        # Format response
-        trends = []
-        for _, row in grouped.iterrows():
-            trends.append({
-                'timestamp': row['recorded_at'].isoformat(),
-                'device_id': row['device__device_id'],
-                'device_name': row['device__device_name'],
-                'temperature_c': round(row['temperature_c'], 1),
-                'power_watts': round(row['power_watts'], 1)
-            })
-
-        return Response(trends)
-
+        return Response([
+            {
+                'recorded_at': row['recorded_at'],
+                'temperature_c': row['temperature_c'],
+                'power_watts': row['power_watts'],
+                'fan_speed_rpm': row['fan_speed_rpm'],
+                'device_name': row['device__name'],
+            }
+            for row in logs
+        ])
     except Exception as e:
         logger.error(f"Error getting Avalon temperature trends: {e}", exc_info=True)
         return Response(
             {'error': 'Failed to get temperature trends'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def avalon_restart_device(request, device_id):
-    """
-    Restart a specific Avalon device.
-    """
+    """Restart a specific Avalon device via cgminer socket API."""
+    import socket
+
     try:
-        device = AvalonDevice.objects.get(device_id=device_id)
+        device = Device.objects.filter(make=Device.MAKE_AVALON, device_id=device_id).first()
+        if device:
+            name, ip = device.name, str(device.ip_address)
+        else:
+            try:
+                legacy = AvalonDevice.objects.get(device_id=device_id)
+            except AvalonDevice.DoesNotExist:
+                return Response({'error': 'Device not found'}, status=status.HTTP_404_NOT_FOUND)
+            name, ip = legacy.device_name, str(legacy.ip_address)
 
-        # Import socket for direct communication
-        import socket
-
-        def send_restart_command(ip):
-            """Send restart command via socket."""
+        def send_restart_command(ip_addr):
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(10)
-                sock.connect((ip, 4028))
+                sock.connect((ip_addr, 4028))
                 sock.send(b"ascset|0,reboot,0")
                 response = sock.recv(1024)
                 sock.close()
@@ -405,24 +345,16 @@ def avalon_restart_device(request, device_id):
                 logger.error(f"Error sending restart command: {e}")
                 return False
 
-        success = send_restart_command(device.ip_address)
-
+        success = send_restart_command(ip)
         if success:
-            return Response({'message': f'Restart command sent to {device.device_name}'})
-        else:
-            return Response(
-                {'error': 'Failed to send restart command'},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-    except AvalonDevice.DoesNotExist:
+            return Response({'message': f'Restart command sent to {name}'})
         return Response(
-            {'error': 'Device not found'},
-            status=status.HTTP_404_NOT_FOUND
+            {'error': 'Failed to send restart command'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     except Exception as e:
         logger.error(f"Error restarting Avalon device: {e}", exc_info=True)
         return Response(
             {'error': 'Failed to restart device'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )

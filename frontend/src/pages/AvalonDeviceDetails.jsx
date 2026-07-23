@@ -93,23 +93,51 @@ export default function AvalonDeviceDetails() {
   const fetchDeviceDetails = async () => {
     try {
       setLoading(true)
-      // Fetch device details and historical data
-      const [deviceResponse, miningHistoryResponse, hardwareHistoryResponse] = await Promise.all([
-        api.get(`/api/avalon/devices/${deviceId}/`),
-        api.get(`/api/avalon/mining-stats/?device_id=${deviceId}&limit=20`),
-        api.get(`/api/avalon/hardware-logs/?device_id=${deviceId}&limit=20`)
-      ])
-
-      setDeviceData({
-        ...deviceResponse.data,
-        mining_history: miningHistoryResponse.data || [],
-        hardware_history: hardwareHistoryResponse.data || []
-      })
+      // Prefer unified details + history; fall back to legacy Avalon endpoints
+      try {
+        const [detailsRes, miningHistoryResponse, hardwareHistoryResponse] = await Promise.all([
+          api.get(`/api/devices/avalon/${deviceId}/details/`),
+          api.get(`/api/mining/?device_id=${deviceId}&make=avalon`).catch(() =>
+            api.get(`/api/avalon/mining-stats/?device_id=${deviceId}&limit=20`)
+          ),
+          api.get(`/api/hardware/?device_id=${deviceId}&make=avalon`).catch(() =>
+            api.get(`/api/avalon/hardware-logs/?device_id=${deviceId}&limit=20`)
+          ),
+        ])
+        const d = detailsRes.data
+        setDeviceData({
+          ...(d.device || {}),
+          ...d.device,
+          latest_mining_stats: d.latest_mining,
+          latest_hardware_logs: d.latest_hardware,
+          latest_system_info: d.latest_system,
+          mining_history: unwrapHistory(miningHistoryResponse.data) || d.hashrate_trend_24h || [],
+          hardware_history: unwrapHistory(hardwareHistoryResponse.data) || d.temperature_trend_24h || [],
+        })
+      } catch {
+        const [deviceResponse, miningHistoryResponse, hardwareHistoryResponse] = await Promise.all([
+          api.get(`/api/avalon/devices/${deviceId}/`),
+          api.get(`/api/avalon/mining-stats/?device_id=${deviceId}&limit=20`),
+          api.get(`/api/avalon/hardware-logs/?device_id=${deviceId}&limit=20`),
+        ])
+        setDeviceData({
+          ...deviceResponse.data,
+          mining_history: miningHistoryResponse.data || [],
+          hardware_history: hardwareHistoryResponse.data || [],
+        })
+      }
     } catch (error) {
       console.error('Error fetching Avalon device details:', error)
     } finally {
       setLoading(false)
     }
+  }
+
+  function unwrapHistory(data) {
+    if (!data) return []
+    if (Array.isArray(data)) return data
+    if (Array.isArray(data.results)) return data.results
+    return []
   }
 
   const formatDate = (dateString) => {

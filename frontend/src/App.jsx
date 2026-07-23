@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import AnalyticsDashboard from '@/pages/AnalyticsDashboard';
 import AvalonDeviceDetails from '@/pages/AvalonDeviceDetails';
 import BitAxeDeviceDetails from '@/pages/BitAxeDeviceDetails';
+import DeviceDetails from '@/pages/DeviceDetails';
 import LoginPage from '@/pages/LoginPage';
 import MiningDashboard from '@/pages/MiningDashboard';
 import OverviewDashboard from '@/pages/OverviewDashboard';
@@ -32,6 +33,9 @@ function AppRoutes() {
       <Routes>
         <Route path="/" element={<OverviewDashboard />} />
         <Route path="/mining" element={<MiningDashboard />} />
+        {/* Unified device detail */}
+        <Route path="/devices/:make/:deviceId" element={<DeviceDetails />} />
+        {/* Legacy detail routes (still supported) */}
         <Route path="/bitaxe/device/:deviceId" element={<BitAxeDeviceDetails />} />
         <Route path="/avalon/device/:deviceId" element={<AvalonDeviceDetails />} />
         <Route path="/analytics" element={<AnalyticsDashboard />} />

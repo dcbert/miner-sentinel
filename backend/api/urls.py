@@ -5,7 +5,12 @@ from . import avalon_views, views
 
 router = DefaultRouter()
 
-# Bitaxe endpoints
+# Unified fleet endpoints
+router.register(r'devices', views.DeviceViewSet, basename='devices')
+router.register(r'mining', views.FleetMiningViewSet, basename='mining')
+router.register(r'hardware', views.FleetHardwareViewSet, basename='hardware')
+
+# Bitaxe endpoints (legacy shims)
 router.register(r'bitaxe/devices', views.BitAxeDeviceViewSet, basename='bitaxe-devices')
 router.register(r'bitaxe/mining', views.BitAxeMiningStatsViewSet, basename='bitaxe-mining')
 router.register(r'bitaxe/hardware', views.BitAxeHardwareLogViewSet, basename='bitaxe-hardware')
@@ -14,6 +19,11 @@ router.register(r'bitaxe/pool', views.BitAxePoolStatsViewSet, basename='bitaxe-p
 
 urlpatterns = [
     path('', include(router.urls)),
+    path(
+        'devices/<str:make>/<str:device_id>/details/',
+        views.device_details_by_make_id,
+        name='device-details-by-make-id',
+    ),
     # Analytics endpoints
     path('overview/analytics/', views.overview_analytics, name='overview-analytics'),
     path('analytics/detailed/', views.detailed_analytics, name='detailed-analytics'),

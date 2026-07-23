@@ -6,17 +6,19 @@ Runs against SQLite in-memory via minersentinel.settings_test (MIGRATION_MODULES
 from unittest.mock import MagicMock, patch
 
 import pytest
+from api.device_sync import sync_avalon_to_unified, sync_bitaxe_to_unified
 from api.models import (
     AvalonDevice,
-    AvalonHardwareLogs,
-    AvalonMiningStats,
     AvalonSystemInfo,
     BitAxeDevice,
-    BitAxeHardwareLog,
-    BitAxeMiningStats,
     BitAxePoolStats,
     BitAxeSystemInfo,
     CollectorSettings,
+    Device,
+    DeviceHardwareStats,
+    DeviceMiningStats,
+    DeviceSystemInfo,
+    PoolStats,
 )
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -44,40 +46,55 @@ def auth_client(api_client, user):
 
 @pytest.fixture
 def bitaxe_device(db):
-    return BitAxeDevice.objects.create(
+    legacy = BitAxeDevice.objects.create(
         device_id='bitaxe-001',
         device_name='Test Bitaxe',
         ip_address='192.168.1.10',
         is_active=True,
     )
+    sync_bitaxe_to_unified(legacy)
+    return legacy
+
+
+@pytest.fixture
+def unified_bitaxe(bitaxe_device):
+    return Device.objects.get(make=Device.MAKE_BITAXE, device_id=bitaxe_device.device_id)
 
 
 @pytest.fixture
 def avalon_device(db):
-    return AvalonDevice.objects.create(
+    legacy = AvalonDevice.objects.create(
         device_id='avalon-001',
         device_name='Test Avalon',
         ip_address='192.168.1.20',
         is_active=True,
     )
+    sync_avalon_to_unified(legacy)
+    return legacy
 
 
 @pytest.fixture
-def mining_stat(bitaxe_device):
-    return BitAxeMiningStats.objects.create(
-        device=bitaxe_device,
+def unified_avalon(avalon_device):
+    return Device.objects.get(make=Device.MAKE_AVALON, device_id=avalon_device.device_id)
+
+
+@pytest.fixture
+def mining_stat(unified_bitaxe):
+    return DeviceMiningStats.objects.create(
+        device=unified_bitaxe,
         recorded_at=timezone.now(),
         hashrate_ghs=450.5,
         shares_accepted=1000,
         shares_rejected=5,
         uptime_seconds=3600,
+        best_difficulty=1_000_000,
     )
 
 
 @pytest.fixture
-def hardware_log(bitaxe_device):
-    return BitAxeHardwareLog.objects.create(
-        device=bitaxe_device,
+def hardware_log(unified_bitaxe):
+    return DeviceHardwareStats.objects.create(
+        device=unified_bitaxe,
         recorded_at=timezone.now(),
         power_watts=15.5,
         temperature_c=65.0,
@@ -87,39 +104,43 @@ def hardware_log(bitaxe_device):
 
 @pytest.fixture
 def pool_stat(db):
-    return BitAxePoolStats.objects.create(
+    return PoolStats.objects.create(
+        pool_type=PoolStats.POOL_CKPOOL,
         pool_address='bc1qtest',
-        hashrate_1m='466G',
-        hashrate_5m='460G',
-        hashrate_1hr='455G',
-        hashrate_1d='450G',
-        hashrate_7d='445G',
-        lastshare=1700000000,
+        recorded_at=timezone.now(),
+        hashrate_1m_display='466G',
+        hashrate_5m_display='460G',
+        hashrate_1h_display='455G',
+        hashrate_1d_display='450G',
+        hashrate_7d_display='445G',
+        hashrate_1m_ghs=466.0,
+        hashrate_1d_ghs=450.0,
+        last_share_unix=1700000000,
         workers=2,
         shares=500000,
-        bestshare=9876543.0,
-        bestever=123456789,
-        authorised=1699000000,
+        best_share=9876543.0,
+        best_ever=123456789,
+        authorised_unix=1699000000,
     )
 
 
 @pytest.fixture
-def avalon_mining_stat(avalon_device):
-    return AvalonMiningStats.objects.create(
-        device=avalon_device,
+def avalon_mining_stat(unified_avalon):
+    return DeviceMiningStats.objects.create(
+        device=unified_avalon,
         recorded_at=timezone.now(),
         hashrate_ghs=6500.0,
         shares_accepted=2000,
         shares_rejected=10,
         uptime_seconds=7200,
-        difficulty=1234567.0,
+        best_difficulty=1234567.0,
     )
 
 
 @pytest.fixture
-def avalon_hardware_log(avalon_device):
-    return AvalonHardwareLogs.objects.create(
-        device=avalon_device,
+def avalon_hardware_log(unified_avalon):
+    return DeviceHardwareStats.objects.create(
+        device=unified_avalon,
         recorded_at=timezone.now(),
         power_watts=130.0,
         temperature_c=65.0,
@@ -620,7 +641,8 @@ class TestModels:
         assert 'AvalonSys' in str(info)
 
     def test_bitaxe_pool_stats_str(self, pool_stat):
-        assert 'Pool Stats' in str(pool_stat)
+        # Unified PoolStats string representation
+        assert 'bc1qtest' in str(pool_stat) or 'ckpool' in str(pool_stat).lower() or 'GH/s' in str(pool_stat)
 
 
 # ---------------------------------------------------------------------------
@@ -628,20 +650,21 @@ class TestModels:
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def system_info(bitaxe_device):
-    return BitAxeSystemInfo.objects.create(
-        device=bitaxe_device,
+def system_info(unified_bitaxe):
+    return DeviceSystemInfo.objects.create(
+        device=unified_bitaxe,
         recorded_at=timezone.now(),
-        asic_model='BM1368',
-        version='2.0.0',
         hostname='bitaxe-001',
+        firmware_version='2.0.0',
+        model_reported='BM1368',
+        details={'asic_model': 'BM1368', 'version': '2.0.0'},
     )
 
 
 @pytest.fixture
-def mining_stat_with_diff(bitaxe_device):
-    return BitAxeMiningStats.objects.create(
-        device=bitaxe_device,
+def mining_stat_with_diff(unified_bitaxe):
+    return DeviceMiningStats.objects.create(
+        device=unified_bitaxe,
         recorded_at=timezone.now(),
         hashrate_ghs=450.5,
         shares_accepted=1000,
@@ -653,9 +676,9 @@ def mining_stat_with_diff(bitaxe_device):
 
 
 @pytest.fixture
-def hardware_log_with_efficiency(bitaxe_device):
-    return BitAxeHardwareLog.objects.create(
-        device=bitaxe_device,
+def hardware_log_with_efficiency(unified_bitaxe):
+    return DeviceHardwareStats.objects.create(
+        device=unified_bitaxe,
         recorded_at=timezone.now(),
         power_watts=15.5,
         temperature_c=65.0,

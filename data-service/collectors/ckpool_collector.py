@@ -1,12 +1,13 @@
 """
-CKPool data collector for Bitaxe mining pool statistics.
-Fetches data from CKPool API and stores it in the database.
+CKPool data collector for mining pool statistics.
+Fetches data from CKPool API, normalizes, dual-writes to pool_stats + legacy.
 """
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
+from collectors.normalized import NormalizedPoolSnapshot, PoolDataWriter
 from retrying import retry
 
 logger = logging.getLogger(__name__)
@@ -15,18 +16,27 @@ logger = logging.getLogger(__name__)
 class CKPoolCollector:
     """Collector for CKPool mining pool statistics."""
 
-    def __init__(self, db_connection, pool_url="https://eusolo.ckpool.org", pool_address=None):
+    def __init__(self, db_connection, pool_url="https://eusolo.ckpool.org", pool_address=None, dual_write=False):
         """
         Initialize CKPool collector.
 
         Args:
-            db_connection: Database connection object
+            db_connection: Database connection object (kept for API compat; writer uses DATABASE_URL)
             pool_url: CKPool API base URL
             pool_address: Bitcoin address or pool username
+            dual_write: also write legacy bitaxe_pool_stats
         """
         self.db = db_connection
         self.pool_url = pool_url.rstrip('/')
         self.pool_address = pool_address
+        self.dual_write = dual_write
+        # Derive database URL from connection if possible; writer opened via dsn from conn
+        self._dsn = None
+        if db_connection is not None:
+            try:
+                self._dsn = db_connection.dsn
+            except Exception:
+                self._dsn = None
         logger.info(f"Initialized CKPool collector for address: {pool_address}")
 
     @retry(stop_max_attempt_number=3, wait_exponential_multiplier=1000, wait_exponential_max=10000)
@@ -93,65 +103,71 @@ class CKPoolCollector:
 
         return value * multipliers.get(unit, 1)
 
-    def store_pool_stats(self, stats_data):
-        """
-        Store pool statistics in the database.
+    def normalize_stats(self, stats_data) -> NormalizedPoolSnapshot:
+        """Convert raw CKPool user JSON into NormalizedPoolSnapshot."""
+        h1m = stats_data.get('hashrate1m', '0')
+        h5m = stats_data.get('hashrate5m', '0')
+        h1h = stats_data.get('hashrate1hr', '0')
+        h1d = stats_data.get('hashrate1d', '0')
+        h7d = stats_data.get('hashrate7d', '0')
+        return NormalizedPoolSnapshot(
+            pool_type='ckpool',
+            pool_address=self.pool_address,
+            pool_url=self.pool_url,
+            recorded_at=datetime.now(timezone.utc),
+            hashrate_1m_ghs=self.convert_hashrate_to_ghs(h1m),
+            hashrate_5m_ghs=self.convert_hashrate_to_ghs(h5m),
+            hashrate_1h_ghs=self.convert_hashrate_to_ghs(h1h),
+            hashrate_1d_ghs=self.convert_hashrate_to_ghs(h1d),
+            hashrate_7d_ghs=self.convert_hashrate_to_ghs(h7d),
+            hashrate_1m_display=str(h1m) if h1m is not None else None,
+            hashrate_5m_display=str(h5m) if h5m is not None else None,
+            hashrate_1h_display=str(h1h) if h1h is not None else None,
+            hashrate_1d_display=str(h1d) if h1d is not None else None,
+            hashrate_7d_display=str(h7d) if h7d is not None else None,
+            workers=int(stats_data.get('workers', 0) or 0),
+            shares=int(stats_data.get('shares', 0) or 0),
+            best_share=float(stats_data.get('bestshare', 0) or 0),
+            best_ever=float(stats_data.get('bestever', 0) or 0),
+            last_share_unix=int(stats_data.get('lastshare', 0) or 0) or None,
+            authorised_unix=int(stats_data.get('authorised', 0) or 0) or None,
+            details={'source': 'ckpool'},
+        )
 
-        Args:
-            stats_data: Pool statistics data from API
-        """
+    def store_pool_stats(self, stats_data):
+        """Store pool statistics via PoolDataWriter (unified + optional legacy)."""
         if not stats_data:
             logger.warning("No stats data to store")
             return
 
         try:
-            cursor = self.db.cursor()
-
-            # Convert hashrates to GH/s for easier querying
-            hashrate_1m_ghs = self.convert_hashrate_to_ghs(stats_data.get('hashrate1m', '0'))
-            hashrate_1d_ghs = self.convert_hashrate_to_ghs(stats_data.get('hashrate1d', '0'))
-
-            # Insert pool statistics
-            query = """
-                INSERT INTO bitaxe_pool_stats (
-                    pool_address, recorded_at,
-                    hashrate_1m, hashrate_5m, hashrate_1hr, hashrate_1d, hashrate_7d,
-                    lastshare, workers, shares, bestshare, bestever, authorised,
-                    hashrate_1m_ghs, hashrate_1d_ghs
-                ) VALUES (
-                    %s, %s,
-                    %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s,
-                    %s, %s
-                )
-            """
-
-            values = (
-                self.pool_address,
-                datetime.now(),
-                stats_data.get('hashrate1m', '0'),
-                stats_data.get('hashrate5m', '0'),
-                stats_data.get('hashrate1hr', '0'),
-                stats_data.get('hashrate1d', '0'),
-                stats_data.get('hashrate7d', '0'),
-                stats_data.get('lastshare', 0),
-                stats_data.get('workers', 0),
-                stats_data.get('shares', 0),
-                stats_data.get('bestshare', 0.0),
-                stats_data.get('bestever', 0),
-                stats_data.get('authorised', 0),
-                hashrate_1m_ghs,
-                hashrate_1d_ghs,
-            )
-
-            cursor.execute(query, values)
-            self.db.commit()
-            logger.info(f"Stored pool stats: {stats_data.get('hashrate1m', 'N/A')} @ {datetime.now()}")
-
+            snapshot = self.normalize_stats(stats_data)
+            database_url = self._resolve_database_url()
+            writer = PoolDataWriter(database_url, dual_write=self.dual_write)
+            writer.write_snapshot(snapshot)
+            logger.info(f"Stored pool stats: {stats_data.get('hashrate1m', 'N/A')} @ {snapshot.recorded_at}")
         except Exception as e:
             logger.error(f"Failed to store pool stats: {e}")
-            self.db.rollback()
             raise
+
+    def _resolve_database_url(self):
+        if self._dsn:
+            # psycopg2 dsn is space-separated key=value
+            parts = dict(p.split('=', 1) for p in self._dsn.split() if '=' in p)
+            user = parts.get('user', 'minersentinel')
+            password = parts.get('password', '')
+            host = parts.get('host', 'localhost')
+            port = parts.get('port', '5432')
+            dbname = parts.get('dbname', 'minersentinel')
+            return f'postgresql://{user}:{password}@{host}:{port}/{dbname}'
+        from decouple import config
+        return (
+            f"postgresql://{config('POSTGRES_USER', default='minersentinel')}:"
+            f"{config('POSTGRES_PASSWORD', default='changeme')}@"
+            f"{config('POSTGRES_HOST', default='postgres')}:"
+            f"{config('POSTGRES_PORT', default='5432')}/"
+            f"{config('POSTGRES_DB', default='minersentinel')}"
+        )
 
     def collect(self):
         """

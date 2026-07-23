@@ -5,47 +5,43 @@ name: MinerSentinel
 version: "1.0.0"
 tagline: Unified monitoring dashboard for Bitaxe and Avalon Bitcoin miners
 description: >-
-  MinerSentinel is a self-hosted monitoring solution designed for Bitcoin home miners running Bitaxe and Avalon Nano 3s ASIC devices. It provides a centralized dashboard to track performance, health, and profitability metrics across your entire mining fleet.
+  MinerSentinel is a self-hosted monitoring solution for Bitcoin home miners running Bitaxe and Avalon Nano 3s ASIC devices. It provides a centralized dashboard for fleet performance, hardware health, pool stats, cost analysis, and alerts—with all data stored locally.
 
 
   **Real-Time Device Monitoring**
 
-  Monitor hashrate, temperature, power consumption, and efficiency for each device.
-  Visual status indicators show online/offline state and hardware health at a glance.
+  Monitor hashrate, temperature, power consumption, and efficiency (J/TH) for each device.
+  Visual status indicators show online/offline state, last-seen times, and hardware health.
 
 
   **Multi-Device Fleet Management**
 
-  Add unlimited Bitaxe and Avalon miners through a simple web interface.
-  Dynamic device management allows adding or removing devices without service restarts.
-  Each device displays individual statistics with drill-down detail views.
+  Add Bitaxe and Avalon miners through the Settings UI without restarting services.
+  Per-device detail views cover mining stats, hardware logs, and system information.
 
 
   **Pool Integration**
 
   Native support for CKPool and Public Pool solo mining statistics.
-  Track your best shares, worker counts, and pool-side hashrate.
-  View historical difficulty submissions and probability calculations for solo block discovery.
+  Track best shares, workers, and pool-side hashrate, plus solo-mining probability estimates.
 
 
-  **Advanced Analytics**
+  **Analytics and Cost Analysis**
 
-  Visualize performance trends with interactive charts.
-  Compare efficiency across devices, analyze power consumption patterns, and predict maintenance needs.
-  Time-series data stored in PostgreSQL enables historical trend analysis.
+  Interactive charts for hashrate and hardware trends over selectable time ranges.
+  Configure energy rate and currency to estimate power cost; optional revenue-style stats use cached network data.
 
 
   **Intelligent Alerts**
 
-  Telegram integration delivers instant notifications for critical events.
-  Receive alerts for device offline status, hashrate stagnation, and new best difficulty achievements.
-  Automatic device restart attempts when stagnation is detected.
+  Telegram and Discord webhook notifications for offline devices, hashrate stagnation,
+  new best difficulty, and automatic restart attempts when supported.
 
 
   **Built for Self-Sovereignty**
 
-  Runs entirely on your own hardware with no external dependencies. All data stays local.
-  Designed for Umbrel with Docker containerization for easy deployment and updates.
+  Runs entirely on your own hardware. All metrics stay in your PostgreSQL database.
+  Packaged for Umbrel with multi-architecture Docker images.
 
 releaseNotes: ""
 developer: Davide Bert

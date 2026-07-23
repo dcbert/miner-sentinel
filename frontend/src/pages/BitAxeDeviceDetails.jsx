@@ -113,7 +113,8 @@ function HealthBar({ label, value, max, unit = '', thresholds = { warning: 60, d
 }
 
 export default function BitAxeDeviceDetails() {
-  const { deviceId } = useParams()
+  const { deviceId, make: makeParam } = useParams()
+  const make = makeParam || 'bitaxe'
   const navigate = useNavigate()
   const [deviceData, setDeviceData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -123,13 +124,19 @@ export default function BitAxeDeviceDetails() {
     // Poll for new data every 2 minutes
     const interval = setInterval(fetchDeviceDetails, 120000)
     return () => clearInterval(interval)
-  }, [deviceId])
+  }, [deviceId, make])
 
   const fetchDeviceDetails = async () => {
     try {
       setLoading(true)
-      const response = await api.get(`/api/bitaxe/system/device/${deviceId}/`)
-      setDeviceData(response.data)
+      // Prefer unified details endpoint; fall back to legacy Bitaxe system path
+      try {
+        const response = await api.get(`/api/devices/${make}/${deviceId}/details/`)
+        setDeviceData(response.data)
+      } catch {
+        const response = await api.get(`/api/bitaxe/system/device/${deviceId}/`)
+        setDeviceData(response.data)
+      }
     } catch (error) {
       console.error('Error fetching device details:', error)
     } finally {

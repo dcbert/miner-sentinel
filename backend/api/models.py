@@ -332,6 +332,221 @@ class AvalonSystemInfo(models.Model):
         return f"{self.device.device_name} System Info at {self.recorded_at}"
 
 
+# ---------------------------------------------------------------------------
+# Unified multi-make device + pool models
+# ---------------------------------------------------------------------------
+
+class Device(models.Model):
+    """Unified device registry for all miner makes."""
+
+    MAKE_BITAXE = 'bitaxe'
+    MAKE_AVALON = 'avalon'
+    MAKE_ANTMINER = 'antminer'
+    MAKE_WHATSMINER = 'whatsminer'
+    MAKE_BRAIINS = 'braiins'
+    MAKE_GOLDSHELL = 'goldshell'
+    MAKE_ICERIVER = 'iceriver'
+    MAKE_OTHER = 'other'
+    MAKE_CHOICES = [
+        (MAKE_BITAXE, 'Bitaxe'),
+        (MAKE_AVALON, 'Avalon'),
+        (MAKE_ANTMINER, 'Antminer'),
+        (MAKE_WHATSMINER, 'Whatsminer'),
+        (MAKE_BRAIINS, 'Braiins'),
+        (MAKE_GOLDSHELL, 'Goldshell'),
+        (MAKE_ICERIVER, 'IceRiver'),
+        (MAKE_OTHER, 'Other'),
+    ]
+
+    PROTOCOL_HTTP_AXEOS = 'http_axeos'
+    PROTOCOL_CGMINER_TCP = 'cgminer_tcp'
+    PROTOCOL_WHATSMINER_API = 'whatsminer_api'
+    PROTOCOL_BRAIINS = 'braiins'
+    PROTOCOL_CUSTOM = 'custom'
+    PROTOCOL_CHOICES = [
+        (PROTOCOL_HTTP_AXEOS, 'HTTP AxeOS'),
+        (PROTOCOL_CGMINER_TCP, 'cgminer TCP'),
+        (PROTOCOL_WHATSMINER_API, 'Whatsminer API'),
+        (PROTOCOL_BRAIINS, 'Braiins'),
+        (PROTOCOL_CUSTOM, 'Custom'),
+    ]
+
+    device_id = models.CharField(max_length=64, db_index=True)
+    name = models.CharField(max_length=100)
+    make = models.CharField(max_length=32, choices=MAKE_CHOICES, db_index=True)
+    model = models.CharField(max_length=100, blank=True, null=True)
+    protocol = models.CharField(max_length=32, choices=PROTOCOL_CHOICES)
+    ip_address = models.GenericIPAddressField()
+    port = models.IntegerField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    last_seen_at = models.DateTimeField(blank=True, null=True)
+    error_message = models.TextField(blank=True, null=True)
+    connection_config = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'devices'
+        unique_together = [('make', 'device_id')]
+        indexes = [
+            models.Index(fields=['is_active']),
+            models.Index(fields=['make']),
+            models.Index(fields=['last_seen_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.make}:{self.device_id})"
+
+
+class DeviceMiningStats(models.Model):
+    """Normalized mining statistics for any device make."""
+
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='mining_stats')
+    recorded_at = models.DateTimeField(db_index=True)
+    hashrate_ghs = models.FloatField(default=0.0, help_text="Hashrate in GH/s (canonical)")
+    hashrate_avg_ghs = models.FloatField(blank=True, null=True)
+    shares_accepted = models.BigIntegerField(default=0)
+    shares_rejected = models.BigIntegerField(default=0)
+    hardware_errors = models.BigIntegerField(blank=True, null=True)
+    blocks_found = models.IntegerField(default=0)
+    uptime_seconds = models.IntegerField(default=0)
+    best_difficulty = models.FloatField(blank=True, null=True, help_text="All-time best share difficulty")
+    best_session_difficulty = models.FloatField(blank=True, null=True)
+    pool_url = models.CharField(max_length=255, blank=True, null=True)
+    pool_user = models.CharField(max_length=255, blank=True, null=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'device_mining_stats'
+        ordering = ['-recorded_at']
+        indexes = [
+            models.Index(fields=['device', '-recorded_at']),
+            models.Index(fields=['-recorded_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.device}: {self.hashrate_ghs} GH/s at {self.recorded_at}"
+
+
+class DeviceHardwareStats(models.Model):
+    """Normalized hardware metrics for any device make."""
+
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='hardware_stats')
+    recorded_at = models.DateTimeField(db_index=True)
+    temperature_c = models.FloatField(blank=True, null=True, help_text="Primary temperature °C")
+    temperature_board_c = models.FloatField(blank=True, null=True)
+    temperature_chip_c = models.FloatField(blank=True, null=True)
+    power_watts = models.FloatField(blank=True, null=True)
+    efficiency_j_per_th = models.FloatField(blank=True, null=True)
+    fan_speed_rpm = models.IntegerField(blank=True, null=True)
+    fan_speed_percent = models.IntegerField(blank=True, null=True)
+    voltage = models.FloatField(blank=True, null=True, help_text="Volts")
+    frequency_mhz = models.FloatField(blank=True, null=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'device_hardware_stats'
+        ordering = ['-recorded_at']
+        indexes = [
+            models.Index(fields=['device', '-recorded_at']),
+            models.Index(fields=['-recorded_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.device}: {self.temperature_c}°C, {self.power_watts}W at {self.recorded_at}"
+
+
+class DeviceSystemInfo(models.Model):
+    """Normalized system/inventory snapshot; vendor extras in details JSON."""
+
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='system_info')
+    recorded_at = models.DateTimeField(db_index=True)
+    hostname = models.CharField(max_length=255, blank=True, null=True)
+    mac_address = models.CharField(max_length=32, blank=True, null=True)
+    firmware_version = models.CharField(max_length=100, blank=True, null=True)
+    serial_number = models.CharField(max_length=100, blank=True, null=True)
+    model_reported = models.CharField(max_length=100, blank=True, null=True)
+    expected_hashrate_ghs = models.FloatField(blank=True, null=True)
+    primary_pool_url = models.CharField(max_length=255, blank=True, null=True)
+    primary_pool_user = models.CharField(max_length=255, blank=True, null=True)
+    fallback_pool_url = models.CharField(max_length=255, blank=True, null=True)
+    fallback_pool_user = models.CharField(max_length=255, blank=True, null=True)
+    using_fallback_pool = models.BooleanField(blank=True, null=True)
+    wifi_ssid = models.CharField(max_length=255, blank=True, null=True)
+    wifi_rssi = models.IntegerField(blank=True, null=True)
+    details = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'device_system_info'
+        ordering = ['-recorded_at']
+        indexes = [
+            models.Index(fields=['device', '-recorded_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.device} System Info at {self.recorded_at}"
+
+
+class PoolStats(models.Model):
+    """Normalized mining pool statistics (CKPool, PublicPool, future sources)."""
+
+    POOL_CKPOOL = 'ckpool'
+    POOL_PUBLICPOOL = 'publicpool'
+    POOL_OCEAN = 'ocean'
+    POOL_OTHER = 'other'
+    POOL_TYPE_CHOICES = [
+        (POOL_CKPOOL, 'CKPool'),
+        (POOL_PUBLICPOOL, 'Public Pool'),
+        (POOL_OCEAN, 'Ocean'),
+        (POOL_OTHER, 'Other'),
+    ]
+
+    pool_type = models.CharField(max_length=32, choices=POOL_TYPE_CHOICES, db_index=True)
+    pool_address = models.CharField(max_length=255, db_index=True)
+    pool_url = models.CharField(max_length=255, blank=True, null=True)
+    recorded_at = models.DateTimeField(db_index=True)
+
+    hashrate_1m_ghs = models.FloatField(blank=True, null=True)
+    hashrate_5m_ghs = models.FloatField(blank=True, null=True)
+    hashrate_1h_ghs = models.FloatField(blank=True, null=True)
+    hashrate_1d_ghs = models.FloatField(blank=True, null=True)
+    hashrate_7d_ghs = models.FloatField(blank=True, null=True)
+
+    hashrate_1m_display = models.CharField(max_length=32, blank=True, null=True)
+    hashrate_5m_display = models.CharField(max_length=32, blank=True, null=True)
+    hashrate_1h_display = models.CharField(max_length=32, blank=True, null=True)
+    hashrate_1d_display = models.CharField(max_length=32, blank=True, null=True)
+    hashrate_7d_display = models.CharField(max_length=32, blank=True, null=True)
+
+    workers = models.IntegerField(blank=True, null=True)
+    shares = models.BigIntegerField(blank=True, null=True)
+    best_share = models.FloatField(blank=True, null=True)
+    best_ever = models.FloatField(blank=True, null=True)
+    last_share_at = models.DateTimeField(blank=True, null=True)
+    last_share_unix = models.BigIntegerField(blank=True, null=True)
+    authorised_unix = models.BigIntegerField(blank=True, null=True)
+
+    pool_total_miners = models.IntegerField(blank=True, null=True)
+    pool_total_hashrate_ghs = models.FloatField(blank=True, null=True)
+
+    details = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = 'pool_stats'
+        ordering = ['-recorded_at']
+        indexes = [
+            models.Index(fields=['pool_type', 'pool_address', '-recorded_at']),
+            models.Index(fields=['-recorded_at']),
+            models.Index(fields=['pool_type', '-recorded_at']),
+        ]
+        verbose_name = 'Pool Statistics'
+        verbose_name_plural = 'Pool Statistics'
+
+    def __str__(self):
+        return f"{self.pool_type}:{self.pool_address} {self.hashrate_1m_ghs} GH/s at {self.recorded_at}"
+
+
 class CollectorSettings(models.Model):
     """
     Singleton model for data collector configuration.

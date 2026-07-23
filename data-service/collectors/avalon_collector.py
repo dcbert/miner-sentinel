@@ -1,15 +1,25 @@
 """
 Avalon Nano 3s device collector
 Uses TCP socket-based cgminer API (port 4028) as documented by Canaan.
+
+Normalizes to canonical units and dual-writes via DeviceDataWriter.
 """
 
 import json
 import logging
 import re
 import socket
-from datetime import datetime
+from datetime import datetime, timezone
 
 import psycopg2
+from collectors.normalized import (
+    DeviceDataWriter,
+    HardwareMetrics,
+    MiningMetrics,
+    NormalizedDeviceSnapshot,
+    SystemMetrics,
+    efficiency_j_per_th,
+)
 from notifications.discord_notifier import DiscordNotifier
 from notifications.telegram_notifier import TelegramNotifier
 from retrying import retry
@@ -20,11 +30,14 @@ logger = logging.getLogger(__name__)
 class AvalonCollector:
     """Collects data from Avalon Nano 3s mining devices."""
 
-    def __init__(self, database_url):
+    MAKE = 'avalon'
+
+    def __init__(self, database_url, dual_write=False):
         self.database_url = database_url
         self.devices = []  # Will be populated from database
         self.telegram_notifier = TelegramNotifier()
         self.discord_notifier = DiscordNotifier()
+        self.writer = DeviceDataWriter(database_url, dual_write=dual_write)
 
     def update_telegram_settings(self, enabled, bot_token, chat_id):
         """Update telegram notification settings."""
@@ -193,16 +206,15 @@ class AvalonCollector:
             return False
 
     def check_hashrate_stagnation(self, device_db_id, device_id, device_name, current_hashrate, device_ip):
-        """Check if hashrate has been unchanged for 3 collections."""
+        """Check if hashrate has been unchanged for 3 collections (unified table)."""
         conn = self.get_db_connection()
         cursor = conn.cursor()
 
         try:
-            # Get last 3 hashrate values
             cursor.execute(
                 """
                 SELECT hashrate_ghs
-                FROM avalon_mining_stats
+                FROM device_mining_stats
                 WHERE device_id = %s
                 ORDER BY recorded_at DESC
                 LIMIT 3
@@ -213,15 +225,10 @@ class AvalonCollector:
             recent_hashrates = [row[0] for row in cursor.fetchall()]
 
             if len(recent_hashrates) >= 3:
-                # Check if all 3 values are the same (within 0.01 GH/s tolerance)
                 if all(abs(hr - recent_hashrates[0]) < 0.01 for hr in recent_hashrates):
                     logger.warning(f"Hashrate stagnation detected for {device_id}")
-
-                    # Send alert notification
                     self.telegram_notifier.send_hashrate_alert(device_id, device_name, current_hashrate, 3)
                     self.discord_notifier.send_hashrate_alert(device_id, device_name, current_hashrate, 3)
-
-                    # Attempt automatic restart
                     logger.info(f"Attempting automatic restart for device {device_id} due to hashrate stagnation")
                     self.restart_device(device_ip, device_id, device_name)
 
@@ -237,49 +244,40 @@ class AvalonCollector:
         cursor = conn.cursor()
 
         try:
-            # Get current device status
             cursor.execute(
                 """
-                SELECT is_active, last_seen_at, device_name
-                FROM avalon_devices
-                WHERE device_id = %s
+                SELECT is_active, last_seen_at, name
+                FROM devices
+                WHERE make = %s AND device_id = %s
             """,
-                (device_id,),
+                (self.MAKE, device_id),
             )
 
             result = cursor.fetchone()
             if not result:
-                return  # Device doesn't exist yet
+                cursor.execute(
+                    """
+                    SELECT is_active, last_seen_at, device_name
+                    FROM avalon_devices
+                    WHERE device_id = %s
+                """,
+                    (device_id,),
+                )
+                result = cursor.fetchone()
+                if not result:
+                    return
 
             current_status, last_seen, device_name = result
+            self.writer.update_device_status(self.MAKE, device_id, is_online, error_message)
 
-            # Update device status
-            cursor.execute(
-                """
-                UPDATE avalon_devices
-                SET last_seen_at = CASE WHEN %s THEN NOW() ELSE last_seen_at END,
-                    error_message = %s
-                WHERE device_id = %s
-            """,
-                (is_online, error_message, device_id),
-            )
-
-            conn.commit()
-
-            # Check if status changed and send notifications
             if current_status and not is_online:
-                # Device went offline
                 last_seen_str = last_seen.strftime("%Y-%m-%d %H:%M:%S") if last_seen else "Unknown"
                 logger.warning(f"Device {device_id} went offline. Last seen: {last_seen_str}")
                 self.telegram_notifier.send_device_offline_alert(device_id, device_name or device_id, last_seen_str, error_message)
                 self.discord_notifier.send_device_offline_alert(device_id, device_name or device_id, last_seen_str, error_message)
 
             elif not current_status and is_online:
-                # Device came back online
                 if last_seen:
-                    from datetime import datetime, timezone
-
-                    # Ensure both datetimes are timezone-aware
                     current_time = datetime.now(timezone.utc)
                     if last_seen.tzinfo is None:
                         last_seen = last_seen.replace(tzinfo=timezone.utc)
@@ -313,18 +311,16 @@ class AvalonCollector:
             return f"{seconds}s"
 
     def check_best_difficulty_improvement(self, device_db_id, device_id, device_name, current_best_diff):
-        """Check if Avalon device achieved a new best difficulty and send notification."""
+        """Check if Avalon device achieved a new best difficulty (unified table)."""
         conn = self.get_db_connection()
         cursor = conn.cursor()
 
         try:
-            # Get the previous best difficulty from the last record
-            # For Avalon, best share is stored in the 'difficulty' field
             cursor.execute(
                 """
-                SELECT difficulty
-                FROM avalon_mining_stats
-                WHERE device_id = %s AND difficulty > 0
+                SELECT best_difficulty
+                FROM device_mining_stats
+                WHERE device_id = %s AND best_difficulty > 0
                 ORDER BY recorded_at DESC
                 LIMIT 1 OFFSET 1
             """,
@@ -334,15 +330,13 @@ class AvalonCollector:
             result = cursor.fetchone()
             previous_best = result[0] if result else 0
 
-            # Check if current best is significantly higher (at least 5% improvement)
             if current_best_diff > 0 and previous_best > 0:
                 improvement = ((current_best_diff - previous_best) / previous_best) * 100
-                if improvement >= 5:  # 5% improvement threshold
+                if improvement >= 5:
                     logger.info(f"New best difficulty for Avalon {device_id}: {current_best_diff}")
                     self.telegram_notifier.send_best_difficulty_alert(device_id, device_name, current_best_diff, previous_best)
                     self.discord_notifier.send_best_difficulty_alert(device_id, device_name, current_best_diff, previous_best)
             elif current_best_diff > 0 and previous_best == 0:
-                # First ever best share for this device
                 logger.info(f"First best difficulty recorded for Avalon {device_id}: {current_best_diff}")
                 self.telegram_notifier.send_best_difficulty_alert(device_id, device_name, current_best_diff, 0)
                 self.discord_notifier.send_best_difficulty_alert(device_id, device_name, current_best_diff, 0)
@@ -477,139 +471,122 @@ class AvalonCollector:
         except (ValueError, TypeError):
             return 0.0
 
+    def normalize_responses(
+        self, device_id, device_ip, device_name, version_info, summary_info, stats_info, pools_info
+    ) -> NormalizedDeviceSnapshot:
+        """Convert cgminer API responses into a NormalizedDeviceSnapshot."""
+        hashrate_ghs = self._parse_hashrate_mhs(summary_info.get('MHS 5s', '0'))
+        uptime_seconds = int(summary_info.get('Elapsed', 0) or 0)
+        shares_accepted = int(summary_info.get('Accepted', 0) or 0)
+        shares_rejected = int(summary_info.get('Rejected', 0) or 0)
+        blocks_found = int(summary_info.get('Found Blocks', 0) or 0)
+        best_share = float(summary_info.get('Best Share', 0) or 0)
+        pool_url = pools_info.get('URL') if pools_info else None
+        pool_user = pools_info.get('User') if pools_info else None
+
+        temperature_c = self._parse_temperature_from_stats(stats_info)
+        power_watts = self._parse_power_from_stats(stats_info)
+        fan_speed_rpm = self._parse_fan_speed_from_stats(stats_info)
+        frequency_mhz = self._parse_frequency_from_stats(stats_info)
+        voltage = self._parse_voltage_from_stats(stats_info)
+
+        details = {
+            'hardware_version': version_info.get('HWTYPE') if version_info else None,
+            'memory_usage_percent': self._parse_memory_usage_from_stats(stats_info),
+            'storage_usage_percent': 0.0,
+            'target_frequency': frequency_mhz,
+            'target_voltage': voltage,
+            'auto_tune_enabled': False,
+            'active_pool': pool_url,
+            'system_uptime_seconds': uptime_seconds,
+            'device_ip': device_ip,
+        }
+
+        return NormalizedDeviceSnapshot(
+            make=self.MAKE,
+            device_id=device_id,
+            recorded_at=datetime.now(timezone.utc),
+            online=True,
+            mining=MiningMetrics(
+                hashrate_ghs=hashrate_ghs,
+                shares_accepted=shares_accepted,
+                shares_rejected=shares_rejected,
+                blocks_found=blocks_found,
+                uptime_seconds=uptime_seconds,
+                best_difficulty=best_share if best_share > 0 else None,
+                best_session_difficulty=None,
+                pool_url=pool_url,
+                pool_user=pool_user,
+            ),
+            hardware=HardwareMetrics(
+                temperature_c=temperature_c,
+                power_watts=power_watts,
+                efficiency_j_per_th=efficiency_j_per_th(power_watts, hashrate_ghs),
+                fan_speed_rpm=fan_speed_rpm,
+                voltage=voltage,
+                frequency_mhz=frequency_mhz,
+            ),
+            system=SystemMetrics(
+                hostname=device_name,
+                mac_address=version_info.get('MAC') if version_info else None,
+                firmware_version=version_info.get('CGMiner') if version_info else None,
+                serial_number=version_info.get('DNA') if version_info else None,
+                model_reported=version_info.get('MODEL') if version_info else None,
+                primary_pool_url=pool_url,
+                primary_pool_user=pool_user,
+                details=details,
+            ),
+        )
+
     def collect_device_data(self, device_id, device_ip):
         """Collect mining and hardware data from a single Avalon device."""
         try:
-            # Get device information using cgminer API commands
             version_info = self._socket_request(device_ip, 'version')
             summary_info = self._socket_request(device_ip, 'summary')
             stats_info = self._socket_request(device_ip, 'estats')
             pools_info = self._socket_request(device_ip, 'pools')
 
-            # Mark device as online since we got successful responses
-            self.update_device_status(device_id, device_ip, True)
-
             conn = self.get_db_connection()
             cursor = conn.cursor()
-
-            # Get device name from database
             cursor.execute(
-                """
-                SELECT id, device_name FROM avalon_devices WHERE device_id = %s
-            """,
-                (device_id,),
+                "SELECT id, name FROM devices WHERE make = %s AND device_id = %s",
+                (self.MAKE, device_id),
             )
             device_row = cursor.fetchone()
-            device_db_id = device_row[0] if device_row else None
-            device_name = device_row[1] if device_row else device_id
-
-            # Use timezone-aware datetime
-            from datetime import datetime, timezone
-
-            recorded_at = datetime.now(timezone.utc)
-
-            # Parse mining data from summary
-            hashrate_ghs = self._parse_hashrate_mhs(summary_info.get('MHS 5s', '0'))
-            uptime_seconds = int(summary_info.get('Elapsed', 0))
-            shares_accepted = int(summary_info.get('Accepted', 0))
-            shares_rejected = int(summary_info.get('Rejected', 0))
-            blocks_found = int(summary_info.get('Found Blocks', 0))
-            best_share = float(summary_info.get('Best Share', 0))
-
-            # Get pool information
-            pool_url = pools_info.get('URL') if pools_info else None
-            pool_user = pools_info.get('User') if pools_info else None
-
-            # Insert mining stats
-            cursor.execute(
-                """
-                INSERT INTO avalon_mining_stats (
-                    device_id, recorded_at, hashrate_ghs, shares_accepted,
-                    shares_rejected, blocks_found, uptime_seconds,
-                    difficulty, pool_url, pool_user, created_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-                (device_db_id, recorded_at, hashrate_ghs, shares_accepted, shares_rejected, blocks_found, uptime_seconds, best_share, pool_url, pool_user, recorded_at),
-            )
-
-            # Check for best difficulty improvement and send notifications
-            if best_share > 0:
-                self.check_best_difficulty_improvement(device_db_id, device_id, device_name, best_share)
-
-            # Parse hardware data from estats
-            temperature_c = self._parse_temperature_from_stats(stats_info)
-            power_watts = self._parse_power_from_stats(stats_info)
-            fan_speed_rpm = self._parse_fan_speed_from_stats(stats_info)
-            frequency_mhz = self._parse_frequency_from_stats(stats_info)
-            voltage = self._parse_voltage_from_stats(stats_info)
-
-            # Calculate efficiency (J/TH)
-            efficiency = (power_watts / (hashrate_ghs / 1000.0)) if hashrate_ghs > 0 else 0
-
-            # Insert hardware logs
-            cursor.execute(
-                """
-                INSERT INTO avalon_hardware_logs (
-                    device_id, recorded_at, power_watts, efficiency_j_per_th,
-                    temperature_c, fan_speed_rpm, voltage, frequency_mhz, created_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-                (device_db_id, recorded_at, power_watts, efficiency, temperature_c, fan_speed_rpm, voltage, frequency_mhz, recorded_at),
-            )
-
-            # Insert extended system info
-            cursor.execute(
-                """
-                INSERT INTO avalon_system_info (
-                    device_id, recorded_at, device_model, firmware_version, hardware_version,
-                    serial_number, mac_address, ip_address, hostname, wifi_ssid, wifi_signal_strength,
-                    primary_pool_url, primary_pool_user, backup_pool_url, backup_pool_user, active_pool,
-                    system_uptime_seconds, memory_usage_percent, storage_usage_percent,
-                    target_frequency, target_voltage, auto_tune_enabled, created_at
-                ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s
+            if not device_row:
+                cursor.execute(
+                    "SELECT id, device_name FROM avalon_devices WHERE device_id = %s",
+                    (device_id,),
                 )
-            """,
-                (
-                    device_db_id,
-                    recorded_at,
-                    version_info.get('MODEL'),
-                    version_info.get('CGMiner'),
-                    version_info.get('HWTYPE'),
-                    version_info.get('DNA'),
-                    version_info.get('MAC'),
-                    device_ip,
-                    device_name,
-                    None,  # WiFi SSID not available in current API
-                    None,  # WiFi signal not available
-                    pool_url,
-                    pool_user,
-                    None,  # Backup pool would need additional parsing
-                    None,  # Backup pool user
-                    pool_url,  # Active pool (assuming first alive pool)
-                    uptime_seconds,
-                    self._parse_memory_usage_from_stats(stats_info),
-                    0.0,  # Storage usage not available
-                    frequency_mhz,
-                    voltage,
-                    False,  # Auto tune status not directly available
-                    recorded_at,
-                ),
-            )
-
-            conn.commit()
+                device_row = cursor.fetchone()
+            device_name = device_row[1] if device_row else device_id
             cursor.close()
             conn.close()
 
-            # Check for notification conditions after data is saved
-            self.check_hashrate_stagnation(device_db_id, device_id, device_name, hashrate_ghs, device_ip)
+            snapshot = self.normalize_responses(
+                device_id, device_ip, device_name,
+                version_info, summary_info, stats_info, pools_info,
+            )
+            device_db_id = self.writer.write_snapshot(snapshot)
+            self.update_device_status(device_id, device_ip, True)
 
-            logger.info(f"Collected data from device {device_id} - Hashrate: {hashrate_ghs:.2f} GH/s, Temp: {temperature_c}°C")
+            if device_db_id and snapshot.mining:
+                if snapshot.mining.best_difficulty and snapshot.mining.best_difficulty > 0:
+                    self.check_best_difficulty_improvement(
+                        device_db_id, device_id, device_name, snapshot.mining.best_difficulty
+                    )
+                self.check_hashrate_stagnation(
+                    device_db_id, device_id, device_name,
+                    snapshot.mining.hashrate_ghs, device_ip,
+                )
+
+            logger.info(
+                f"Collected data from device {device_id} - "
+                f"Hashrate: {snapshot.mining.hashrate_ghs:.2f} GH/s, "
+                f"Temp: {snapshot.hardware.temperature_c}°C"
+            )
 
         except Exception as e:
-            # Mark device as offline and log the error
             error_msg = str(e)
             logger.error(f"Error collecting data from device {device_id} ({device_ip}): {e}", exc_info=True)
             self.update_device_status(device_id, device_ip, False, error_msg)

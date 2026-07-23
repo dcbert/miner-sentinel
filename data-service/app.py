@@ -118,30 +118,62 @@ def load_settings_from_database():
 
 
 def load_active_devices():
-    """Load active devices from database and update collectors."""
+    """Load active devices from unified devices table (fallback to legacy)."""
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        # Load Bitaxe devices
-        cursor.execute("""
-            SELECT device_id, device_name, ip_address
-            FROM bitaxe_devices
-            WHERE is_active = TRUE
-        """)
-        bitaxe_devices = cursor.fetchall()
-        bitaxe_collector.update_devices(bitaxe_devices)
-        logger.info(f"Loaded {len(bitaxe_devices)} active Bitaxe devices")
+        bitaxe_devices = []
+        avalon_devices = []
 
-        # Load Avalon devices
-        cursor.execute("""
-            SELECT device_id, device_name, ip_address
-            FROM avalon_devices
-            WHERE is_active = TRUE
-        """)
-        avalon_devices = cursor.fetchall()
+        # Prefer unified registry
+        try:
+            cursor.execute("""
+                SELECT device_id, name AS device_name, ip_address, make, protocol, port
+                FROM devices
+                WHERE is_active = TRUE
+            """)
+            unified = cursor.fetchall()
+            for row in unified:
+                entry = {
+                    'device_id': row['device_id'],
+                    'device_name': row['device_name'],
+                    'ip_address': row['ip_address'],
+                    'port': row.get('port'),
+                }
+                if row['make'] == 'bitaxe':
+                    bitaxe_devices.append(entry)
+                elif row['make'] == 'avalon':
+                    avalon_devices.append(entry)
+            if unified:
+                logger.info(
+                    f"Loaded {len(bitaxe_devices)} Bitaxe + {len(avalon_devices)} Avalon "
+                    f"devices from unified devices table"
+                )
+        except Exception as e:
+            logger.warning(f"Unified devices table not available, using legacy: {e}")
+            unified = []
+
+        if not unified:
+            cursor.execute("""
+                SELECT device_id, device_name, ip_address
+                FROM bitaxe_devices
+                WHERE is_active = TRUE
+            """)
+            bitaxe_devices = cursor.fetchall()
+            cursor.execute("""
+                SELECT device_id, device_name, ip_address
+                FROM avalon_devices
+                WHERE is_active = TRUE
+            """)
+            avalon_devices = cursor.fetchall()
+            logger.info(
+                f"Loaded {len(bitaxe_devices)} Bitaxe + {len(avalon_devices)} Avalon "
+                f"devices from legacy tables"
+            )
+
+        bitaxe_collector.update_devices(bitaxe_devices)
         avalon_collector.update_devices(avalon_devices)
-        logger.info(f"Loaded {len(avalon_devices)} active Avalon devices")
 
         cursor.close()
         conn.close()

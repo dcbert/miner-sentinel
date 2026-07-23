@@ -1,6 +1,70 @@
 from rest_framework import serializers
 
-from .models import AvalonDevice, BitAxeDevice, BitAxeHardwareLog, BitAxeMiningStats, BitAxePoolStats, BitAxeSystemInfo, CollectorSettings
+from .models import (
+    AvalonDevice,
+    BitAxeDevice,
+    BitAxeHardwareLog,
+    BitAxeMiningStats,
+    BitAxePoolStats,
+    BitAxeSystemInfo,
+    CollectorSettings,
+    Device,
+)
+
+
+# Protocol defaults when creating via unified API
+MAKE_PROTOCOL = {
+    Device.MAKE_BITAXE: Device.PROTOCOL_HTTP_AXEOS,
+    Device.MAKE_AVALON: Device.PROTOCOL_CGMINER_TCP,
+}
+
+
+class DeviceSerializer(serializers.ModelSerializer):
+    """Unified device registry with device_name alias for frontend."""
+    device_name = serializers.CharField(source='name')
+
+    class Meta:
+        model = Device
+        fields = [
+            'id', 'device_id', 'device_name', 'make', 'model', 'protocol',
+            'ip_address', 'port', 'is_active', 'last_seen_at', 'error_message',
+            'connection_config', 'created_at',
+        ]
+        read_only_fields = ['created_at', 'last_seen_at', 'error_message']
+
+
+class DeviceWriteSerializer(serializers.ModelSerializer):
+    """Create/update unified device; accepts device_name."""
+    device_name = serializers.CharField(source='name')
+    protocol = serializers.CharField(required=False, allow_blank=True)
+    port = serializers.IntegerField(required=False, allow_null=True)
+
+    class Meta:
+        model = Device
+        fields = [
+            'device_id', 'device_name', 'make', 'model', 'protocol',
+            'ip_address', 'port', 'is_active',
+        ]
+
+    def validate_make(self, value):
+        allowed = {c[0] for c in Device.MAKE_CHOICES}
+        if value not in allowed:
+            raise serializers.ValidationError(f'Unsupported make: {value}')
+        return value
+
+    def create(self, validated_data):
+        make = validated_data.get('make')
+        if not validated_data.get('protocol'):
+            validated_data['protocol'] = MAKE_PROTOCOL.get(make, Device.PROTOCOL_CUSTOM)
+        if make == Device.MAKE_AVALON and not validated_data.get('port'):
+            validated_data['port'] = 4028
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        make = validated_data.get('make', instance.make)
+        if 'protocol' in validated_data and not validated_data['protocol']:
+            validated_data['protocol'] = MAKE_PROTOCOL.get(make, instance.protocol)
+        return super().update(instance, validated_data)
 
 
 class BitAxeDeviceSerializer(serializers.ModelSerializer):

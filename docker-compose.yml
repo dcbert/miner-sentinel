@@ -2,7 +2,8 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # Match Umbrel / production dumps (pg_restore from PG 17 requires server ≥ 17)
+    image: postgres:17-alpine
     container_name: minersentinel-postgres
     restart: unless-stopped
     env_file: ".env"

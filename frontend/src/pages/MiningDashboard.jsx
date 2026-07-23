@@ -24,6 +24,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
+import { deviceDetailPath, makeLabel, unwrapList } from '@/lib/devices';
 
 // ============================================
 // HELPER COMPONENTS
@@ -167,26 +168,20 @@ function SectionHeader({ icon: Icon, title, description, action }) {
 export default function MiningDashboard() {
   const navigate = useNavigate()
 
-  // Pool stats (shared)
+  // Pool stats
   const [poolStats, setPoolStats] = useState([])
   const [latestStats, setLatestStats] = useState(null)
   const [statistics, setStatistics] = useState(null)
 
-  // Bitaxe devices
-  const [bitaxeDevices, setBitaxeDevices] = useState([])
-  const [bitaxeDeviceMiningStats, setBitaxeDeviceMiningStats] = useState([])
-  const [bitaxeDeviceHardwareStats, setBitaxeDeviceHardwareStats] = useState([])
-
-  // Avalon devices
-  const [avalonDevices, setAvalonDevices] = useState([])
-  const [avalonDeviceMiningStats, setAvalonDeviceMiningStats] = useState([])
-  const [avalonDeviceHardwareStats, setAvalonDeviceHardwareStats] = useState([])
+  // Unified fleet
+  const [devices, setDevices] = useState([])
+  const [deviceMiningStats, setDeviceMiningStats] = useState([])
+  const [deviceHardwareStats, setDeviceHardwareStats] = useState([])
 
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     fetchData()
-    // Poll for new data every 2 minutes
     const interval = setInterval(fetchData, 120000)
     return () => clearInterval(interval)
   }, [])
@@ -195,103 +190,56 @@ export default function MiningDashboard() {
     try {
       setLoading(true)
 
-      // Fetch all data in parallel - both Bitaxe and Avalon
-      const [
-        poolRes, latestRes, statsRes,
-        bitaxeDevicesRes, bitaxeMiningRes, bitaxeHardwareRes,
-        avalonDevicesRes, avalonMiningRes, avalonHardwareRes
-      ] = await Promise.all([
-        // Pool data (shared)
+      const [poolRes, latestRes, statsRes, devicesRes, miningRes, hardwareRes] = await Promise.all([
         api.get('/api/bitaxe/pool/?limit=50').catch(() => ({ data: { results: [] } })),
         api.get('/api/bitaxe/pool/latest/').catch(() => ({ data: null })),
         api.get('/api/bitaxe/pool/statistics/?days=7').catch(() => ({ data: null })),
-
-        // Bitaxe data
-        api.get('/api/bitaxe/devices/').catch(() => ({ data: { results: [] } })),
-        api.get('/api/bitaxe/mining/latest/').catch(() => ({ data: [] })),
-        api.get('/api/bitaxe/hardware/latest/').catch(() => ({ data: [] })),
-
-        // Avalon data
-        api.get('/api/avalon/devices/').catch(() => ({ data: [] })),
-        api.get('/api/avalon/mining-stats/').catch(() => ({ data: [] })),
-        api.get('/api/avalon/hardware-logs/').catch(() => ({ data: [] })),
+        api.get('/api/devices/').catch(() => ({ data: { results: [] } })),
+        api.get('/api/mining/latest/').catch(() => ({ data: [] })),
+        api.get('/api/hardware/latest/').catch(() => ({ data: [] })),
       ])
 
-      // Pool stats (shared)
-      setPoolStats(poolRes.data.results || poolRes.data || [])
-      setLatestStats(latestRes.data)
+      setPoolStats(unwrapList(poolRes.data))
+      setLatestStats(latestRes.data?.detail ? null : latestRes.data)
       setStatistics(statsRes.data)
-
-      // Bitaxe data
-      setBitaxeDevices(bitaxeDevicesRes.data.results || bitaxeDevicesRes.data || [])
-      setBitaxeDeviceMiningStats(bitaxeMiningRes.data || [])
-      setBitaxeDeviceHardwareStats(bitaxeHardwareRes.data || [])
-
-      // Avalon data
-      setAvalonDevices(avalonDevicesRes.data.results || avalonDevicesRes.data || [])
-      setAvalonDeviceMiningStats(avalonMiningRes.data || [])
-      setAvalonDeviceHardwareStats(avalonHardwareRes.data || [])
-
+      setDevices(unwrapList(devicesRes.data))
+      setDeviceMiningStats(Array.isArray(miningRes.data) ? miningRes.data : [])
+      setDeviceHardwareStats(Array.isArray(hardwareRes.data) ? hardwareRes.data : [])
     } catch (error) {
       console.error('Error fetching mining data:', error)
     } finally {
       setLoading(false)
     }
-  };
-
-  // Utility functions to combine both device types
-  const getAllDevices = () => {
-    const bitaxeDevicesWithType = bitaxeDevices.map(device => ({ ...device, deviceType: 'bitaxe' }))
-    const avalonDevicesWithType = avalonDevices.map(device => ({ ...device, deviceType: 'avalon' }))
-    return [...bitaxeDevicesWithType, ...avalonDevicesWithType]
   }
 
-  const getAllMiningStats = () => {
-    // Get latest mining stats per device to avoid duplicates
-    const bitaxeLatestStats = bitaxeDeviceMiningStats.map(stat => ({ ...stat, deviceType: 'bitaxe' }))
+  const bitaxeDevices = devices.filter((d) => d.make === 'bitaxe')
+  const avalonDevices = devices.filter((d) => d.make === 'avalon')
 
-    // For Avalon, get only the latest stat per device
-    const avalonStatsGrouped = avalonDeviceMiningStats.reduce((acc, stat) => {
-      if (!acc[stat.device] || new Date(stat.recorded_at) > new Date(acc[stat.device].recorded_at)) {
-        acc[stat.device] = stat
-      }
-      return acc
-    }, {})
+  const getAllDevices = () =>
+    devices.map((device) => ({ ...device, deviceType: device.make }))
 
-    const avalonLatestStats = Object.values(avalonStatsGrouped).map(stat => ({ ...stat, deviceType: 'avalon' }))
+  const getAllMiningStats = () =>
+    deviceMiningStats.map((stat) => ({
+      ...stat,
+      deviceType: stat.device_type || 'bitaxe',
+    }))
 
-    return [...bitaxeLatestStats, ...avalonLatestStats]
-  }
+  const getAllHardwareStats = () =>
+    deviceHardwareStats.map((stat) => ({
+      ...stat,
+      deviceType: stat.device_type || 'bitaxe',
+    }))
 
-  const getAllHardwareStats = () => {
-    // Get latest hardware stats per device to avoid duplicates
-    const bitaxeLatestStats = bitaxeDeviceHardwareStats.map(stat => ({ ...stat, deviceType: 'bitaxe' }))
-
-    // For Avalon, get only the latest stat per device
-    const avalonStatsGrouped = avalonDeviceHardwareStats.reduce((acc, stat) => {
-      if (!acc[stat.device] || new Date(stat.recorded_at) > new Date(acc[stat.device].recorded_at)) {
-        acc[stat.device] = stat
-      }
-      return acc
-    }, {})
-
-    const avalonLatestStats = Object.values(avalonStatsGrouped).map(stat => ({ ...stat, deviceType: 'avalon' }))
-
-    return [...bitaxeLatestStats, ...avalonLatestStats]
-  }
-
-  const formatHashrate = (hashrateValue, deviceType = null) => {
-    if (!hashrateValue) return 'N/A'
-
-    // Bitaxe reports in TH/s, Avalon reports in GH/s
-    if (deviceType === 'avalon') {
-      // Avalon hashrate is in GH/s, convert to TH/s for display
-      const ths = parseFloat(hashrateValue) / 1000
-      return `${ths.toFixed(2)} TH/s`
-    } else {
-      // Bitaxe or unknown - assume TH/s format
-      return typeof hashrateValue === 'string' ? hashrateValue : `${parseFloat(hashrateValue).toFixed(2)} TH/s`
+  const formatHashrate = (hashrateValue) => {
+    if (!hashrateValue && hashrateValue !== 0) return 'N/A'
+    // Pool display strings like "466G" or numeric GH/s
+    if (typeof hashrateValue === 'string' && /[A-Za-z]/.test(hashrateValue)) {
+      return hashrateValue
     }
+    const ghs = parseFloat(hashrateValue)
+    if (Number.isNaN(ghs)) return 'N/A'
+    if (ghs >= 1000) return `${(ghs / 1000).toFixed(2)} TH/s`
+    return `${ghs.toFixed(2)} GH/s`
   }
 
   const formatDeviceHashrate = (hashrateValue, deviceType = null) => {
@@ -442,8 +390,8 @@ export default function MiningDashboard() {
   }))
 
   // Calculate totals for summary
-  const totalDevices = bitaxeDevices.length + avalonDevices.length
-  const activeDevices = bitaxeDevices.filter(d => d.is_active).length + avalonDevices.filter(d => d.is_active).length
+  const totalDevices = devices.length
+  const activeDevices = devices.filter((d) => d.is_active).length
   const allMiningStats = getAllMiningStats()
   const allHardwareStats = getAllHardwareStats()
 
@@ -453,7 +401,10 @@ export default function MiningDashboard() {
   const avgTemp = allHardwareStats.length > 0
     ? allHardwareStats.reduce((sum, s) => sum + (s.temperature_c || 0), 0) / allHardwareStats.length
     : 0
-  const maxBestDifficulty = allMiningStats.reduce((max, s) => Math.max(max, s.best_difficulty || 0), 0)
+  const maxBestDifficulty = allMiningStats.reduce(
+    (max, s) => Math.max(max, s.best_difficulty || s.difficulty || 0),
+    0,
+  )
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -517,7 +468,12 @@ export default function MiningDashboard() {
           <MetricCard
             title="Active Devices"
             value={`${activeDevices}/${totalDevices}`}
-            subtitle={`${bitaxeDevices.length} Bitaxe, ${avalonDevices.length} Avalon`}
+            subtitle={
+              [
+                bitaxeDevices.length ? `${bitaxeDevices.length} Bitaxe` : null,
+                avalonDevices.length ? `${avalonDevices.length} Avalon` : null,
+              ].filter(Boolean).join(', ') || 'No devices'
+            }
             icon={Monitor}
             iconColor="text-purple-500"
           />
@@ -550,20 +506,22 @@ export default function MiningDashboard() {
           />
           <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {allMiningStats.map((stat) => {
-              const hardware = allHardwareStats.find(h => h.device === stat.device && h.deviceType === stat.deviceType) || {}
-              const device = getAllDevices().find(d => d.id === stat.device && d.deviceType === stat.deviceType) || {}
-              const deviceType = stat.deviceType || 'bitaxe'
-              const navPath = deviceType === 'avalon'
-                ? `/avalon/device/${device?.device_id}`
-                : `/bitaxe/device/${device?.device_id}`
+              const hardware = allHardwareStats.find(
+                (h) => h.device === stat.device && h.deviceType === stat.deviceType,
+              ) || {}
+              const device = getAllDevices().find(
+                (d) => d.id === stat.device && d.deviceType === stat.deviceType,
+              ) || {}
+              const deviceType = stat.deviceType || device.make || 'bitaxe'
+              const deviceId = device.device_id || stat.device_id_str
               return (
                 <DeviceCard
-                  key={`${stat.device}-${stat.deviceType}`}
+                  key={`${stat.device}-${deviceType}`}
                   device={device}
                   miningStats={stat}
                   hardwareStats={hardware}
                   deviceType={deviceType}
-                  onClick={() => navigate(navPath)}
+                  onClick={() => deviceId && navigate(deviceDetailPath(deviceType, deviceId))}
                 />
               )
             })}
@@ -783,8 +741,12 @@ export default function MiningDashboard() {
                     </TableHeader>
                     <TableBody>
                       {bitaxeDevices.map((device) => {
-                        const miningStats = bitaxeDeviceMiningStats.find(stat => stat.device === device.id)
-                        const hardwareStats = bitaxeDeviceHardwareStats.find(stat => stat.device === device.id)
+                        const miningStats = deviceMiningStats.find(
+                          (stat) => stat.device === device.id || stat.device_id_str === device.device_id,
+                        )
+                        const hardwareStats = deviceHardwareStats.find(
+                          (stat) => stat.device === device.id || stat.device_id_str === device.device_id,
+                        )
                         const temp = hardwareStats?.temperature_c
                         const tempColor = temp > 70 ? 'text-red-500' : temp > 60 ? 'text-yellow-500' : ''
                         return (
@@ -811,7 +773,7 @@ export default function MiningDashboard() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => navigate(`/bitaxe/device/${device.device_id}`)}
+                                onClick={() => navigate(deviceDetailPath('bitaxe', device.device_id))}
                               >
                                 <ChevronRight className="h-4 w-4" />
                               </Button>
@@ -869,8 +831,12 @@ export default function MiningDashboard() {
                     </TableHeader>
                     <TableBody>
                       {avalonDevices.map((device) => {
-                        const miningStats = avalonDeviceMiningStats.find(stat => stat.device === device.id)
-                        const hardwareStats = avalonDeviceHardwareStats.find(stat => stat.device === device.id)
+                        const miningStats = deviceMiningStats.find(
+                          (stat) => stat.device === device.id || stat.device_id_str === device.device_id,
+                        )
+                        const hardwareStats = deviceHardwareStats.find(
+                          (stat) => stat.device === device.id || stat.device_id_str === device.device_id,
+                        )
                         const temp = hardwareStats?.temperature_c
                         const tempColor = temp > 70 ? 'text-red-500' : temp > 60 ? 'text-yellow-500' : ''
                         return (
