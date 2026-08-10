@@ -5,6 +5,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
+import { useTimeRange } from '@/lib/TimeRangeContext';
+import { formatRangeWindow, toAnalyticsParams } from '@/lib/timeRange';
 import {
   Activity,
   AlertTriangle,
@@ -507,7 +509,7 @@ function DeviceComparisonTable({ devices }) {
 }
 
 // Historical Best Shares Chart
-function BestSharesHistoryChart({ dailyBests }) {
+function BestSharesHistoryChart({ dailyBests, rangeLabel }) {
   if (!dailyBests || dailyBests.length === 0) {
     return (
       <Card>
@@ -537,7 +539,9 @@ function BestSharesHistoryChart({ dailyBests }) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
           <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5" />
-          <span className="truncate">Best Shares History (Last 30 Days)</span>
+          <span className="truncate">
+            Best Shares History{rangeLabel ? ` (${rangeLabel})` : ''}
+          </span>
         </CardTitle>
         <CardDescription className="text-xs sm:text-sm">
           Daily best shares: All-Time Best vs Session Best
@@ -1178,6 +1182,7 @@ function SoloMiningStats({ totalHashrateGhs, bestDifficulty, bestDifficultyForma
 }
 
 export default function AnalyticsDashboard() {
+  const { range } = useTimeRange()
   const [analytics, setAnalytics] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -1196,12 +1201,13 @@ export default function AnalyticsDashboard() {
     fetchAnalytics()
     const interval = setInterval(fetchAnalytics, 300000) // Refresh every 5 minutes
     return () => clearInterval(interval)
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range.key, range.from?.getTime?.(), range.to?.getTime?.(), range.hours, range.days])
 
   const fetchAnalytics = async () => {
     try {
       const response = await api.get('/api/analytics/detailed/', {
-        params: { hours: 24, days: 30 }
+        params: toAnalyticsParams(range),
       })
       setAnalytics(response.data)
       setError(null)
@@ -1244,7 +1250,11 @@ export default function AnalyticsDashboard() {
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold">Analytics Dashboard</h1>
         <p className="text-sm sm:text-base text-muted-foreground">
-          Advanced insights, predictions, and cross-data analysis
+          Insights & predictions · period analysis for{' '}
+          <span className="text-foreground/80 font-medium">{range.label.toLowerCase()}</span>
+        </p>
+        <p className="text-[10px] sm:text-xs text-muted-foreground/80 mt-0.5">
+          {formatRangeWindow(range)}
         </p>
       </div>
 
@@ -1263,7 +1273,7 @@ export default function AnalyticsDashboard() {
             <PredictionCard prediction={prediction} />
             <TopSharesTable topShares={topShares} />
           </div>
-          <BestSharesHistoryChart dailyBests={dailyBests} />
+          <BestSharesHistoryChart dailyBests={dailyBests} rangeLabel={range.label} />
         </TabsContent>
 
         {/* SOLO MINING TAB */}

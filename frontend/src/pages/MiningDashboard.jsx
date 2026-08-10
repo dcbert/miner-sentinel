@@ -24,7 +24,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
-import { deviceDetailPath, makeLabel, unwrapList } from '@/lib/devices';
+import { deviceDetailPath, isDeviceOnline, makeLabel, unwrapList } from '@/lib/devices';
+import { useTimeRange } from '@/lib/TimeRangeContext';
+import { formatRangeWindow, toDaysParams, toHoursParams } from '@/lib/timeRange';
 
 // ============================================
 // HELPER COMPONENTS
@@ -78,7 +80,7 @@ function MetricCard({ title, value, subtitle, icon: Icon, trend, trendValue, ico
 
 // Device card with quick stats
 function DeviceCard({ device, miningStats, hardwareStats, deviceType, onClick }) {
-  const isOnline = device?.is_active !== false
+  const isOnline = isDeviceOnline(device)
   const temp = hardwareStats?.temperature_c
   const tempStatus = temp > 70 ? 'danger' : temp > 60 ? 'warning' : 'normal'
   const tempColor = tempStatus === 'danger' ? 'text-red-500' : tempStatus === 'warning' ? 'text-yellow-500' : 'text-green-500'
@@ -167,6 +169,7 @@ function SectionHeader({ icon: Icon, title, description, action }) {
 
 export default function MiningDashboard() {
   const navigate = useNavigate()
+  const { range } = useTimeRange()
 
   // Pool stats
   const [poolStats, setPoolStats] = useState([])
@@ -184,22 +187,31 @@ export default function MiningDashboard() {
     fetchData()
     const interval = setInterval(fetchData, 120000)
     return () => clearInterval(interval)
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range.key, range.from?.getTime?.(), range.to?.getTime?.(), range.hours, range.days])
 
   const fetchData = async () => {
     try {
       setLoading(true)
+      const hoursParams = toHoursParams(range)
+      const daysParams = toDaysParams(range)
 
       const [poolRes, latestRes, statsRes, devicesRes, miningRes, hardwareRes] = await Promise.all([
-        api.get('/api/bitaxe/pool/?limit=50').catch(() => ({ data: { results: [] } })),
+        // Prefer trend endpoint scoped to range; fall back to paginated list
+        api.get('/api/bitaxe/pool/hashrate_trend/', { params: hoursParams }).catch(() =>
+          api.get('/api/bitaxe/pool/', { params: { ...hoursParams, limit: 500 } }).catch(() => ({ data: [] })),
+        ),
         api.get('/api/bitaxe/pool/latest/').catch(() => ({ data: null })),
-        api.get('/api/bitaxe/pool/statistics/?days=7').catch(() => ({ data: null })),
+        api.get('/api/bitaxe/pool/statistics/', { params: daysParams }).catch(() => ({ data: null })),
         api.get('/api/devices/').catch(() => ({ data: { results: [] } })),
         api.get('/api/mining/latest/').catch(() => ({ data: [] })),
         api.get('/api/hardware/latest/').catch(() => ({ data: [] })),
       ])
 
-      setPoolStats(unwrapList(poolRes.data))
+      const poolData = Array.isArray(poolRes.data)
+        ? poolRes.data
+        : unwrapList(poolRes.data)
+      setPoolStats(poolData)
       setLatestStats(latestRes.data?.detail ? null : latestRes.data)
       setStatistics(statsRes.data)
       setDevices(unwrapList(devicesRes.data))
@@ -381,8 +393,11 @@ export default function MiningDashboard() {
     return Math.round(num).toLocaleString()
   }
 
-  // Prepare chart data for hashrate trends
-  const hashrateChartData = poolStats.slice().reverse().map(stat => ({
+  // Prepare chart data for hashrate trends (trend endpoint is ascending; list may be reverse)
+  const sortedPool = [...poolStats].sort(
+    (a, b) => new Date(a.recorded_at) - new Date(b.recorded_at),
+  )
+  const hashrateChartData = sortedPool.map((stat) => ({
     time: formatDate(stat.recorded_at),
     hashrate_1m_ghs: stat.hashrate_1m_ghs || 0,
     hashrate_1d_ghs: stat.hashrate_1d_ghs || 0,
@@ -391,7 +406,7 @@ export default function MiningDashboard() {
 
   // Calculate totals for summary
   const totalDevices = devices.length
-  const activeDevices = devices.filter((d) => d.is_active).length
+  const activeDevices = devices.filter((d) => isDeviceOnline(d)).length
   const allMiningStats = getAllMiningStats()
   const allHardwareStats = getAllHardwareStats()
 
@@ -419,7 +434,11 @@ export default function MiningDashboard() {
           <div>
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Mining</h1>
             <p className="text-xs sm:text-sm text-muted-foreground">
-              Device monitoring & pool performance
+              Live device status · pool history for{' '}
+              <span className="text-foreground/80 font-medium">{range.label.toLowerCase()}</span>
+            </p>
+            <p className="text-[10px] text-muted-foreground/80 mt-0.5 hidden sm:block">
+              {formatRangeWindow(range)}
             </p>
           </div>
         </div>
@@ -671,13 +690,13 @@ export default function MiningDashboard() {
               </Card>
             )}
 
-            {/* 7-Day Statistics */}
+            {/* Period statistics for selected time range */}
             {statistics && (
               <Card>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base flex items-center gap-2">
                     <TrendingUp className="h-4 w-4 text-blue-500" />
-                    7-Day Performance
+                    Performance · {range.label}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -719,7 +738,7 @@ export default function MiningDashboard() {
                     <CardDescription>{bitaxeDevices.length} device{bitaxeDevices.length !== 1 ? 's' : ''} registered</CardDescription>
                   </div>
                 </div>
-                <Badge variant="outline">{bitaxeDevices.filter(d => d.is_active).length} Online</Badge>
+                <Badge variant="outline">{bitaxeDevices.filter((d) => isDeviceOnline(d)).length} Online</Badge>
               </div>
             </CardHeader>
             <CardContent>
@@ -759,9 +778,9 @@ export default function MiningDashboard() {
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-2">
-                                <StatusIndicator status={device.is_active ? 'online' : 'offline'} />
-                                <Badge variant={device.is_active ? "default" : "destructive"} className="text-xs">
-                                  {device.is_active ? "Online" : "Offline"}
+                                <StatusIndicator status={isDeviceOnline(device) ? 'online' : 'offline'} />
+                                <Badge variant={isDeviceOnline(device) ? "default" : "destructive"} className="text-xs">
+                                  {isDeviceOnline(device) ? "Online" : "Offline"}
                                 </Badge>
                               </div>
                             </TableCell>
@@ -809,7 +828,7 @@ export default function MiningDashboard() {
                     <CardDescription>{avalonDevices.length} device{avalonDevices.length !== 1 ? 's' : ''} registered</CardDescription>
                   </div>
                 </div>
-                <Badge variant="outline">{avalonDevices.filter(d => d.is_active).length} Online</Badge>
+                <Badge variant="outline">{avalonDevices.filter((d) => isDeviceOnline(d)).length} Online</Badge>
               </div>
             </CardHeader>
             <CardContent>
@@ -849,9 +868,9 @@ export default function MiningDashboard() {
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-2">
-                                <StatusIndicator status={device.is_active ? 'online' : 'offline'} />
-                                <Badge variant={device.is_active ? "default" : "destructive"} className="text-xs">
-                                  {device.is_active ? "Online" : "Offline"}
+                                <StatusIndicator status={isDeviceOnline(device) ? 'online' : 'offline'} />
+                                <Badge variant={isDeviceOnline(device) ? "default" : "destructive"} className="text-xs">
+                                  {isDeviceOnline(device) ? "Online" : "Offline"}
                                 </Badge>
                               </div>
                             </TableCell>
@@ -1004,7 +1023,9 @@ export default function MiningDashboard() {
                   </div>
                   <div>
                     <CardTitle className="text-lg">Pool History</CardTitle>
-                    <CardDescription>Recent pool performance snapshots</CardDescription>
+                    <CardDescription>
+                      Pool snapshots · {range.label.toLowerCase()}
+                    </CardDescription>
                   </div>
                 </div>
                 <Badge variant="outline">{poolStats.length} records</Badge>
@@ -1036,17 +1057,24 @@ export default function MiningDashboard() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {poolStats.slice(0, 20).map((stat, index) => (
+                      {[...poolStats]
+                        .sort((a, b) => new Date(b.recorded_at) - new Date(a.recorded_at))
+                        .slice(0, 50)
+                        .map((stat, index) => {
+                          const best = stat.bestshare ?? stat.best_share ?? 0
+                          return (
                         <TableRow key={stat.id || index} className="hover:bg-muted/30">
                           <TableCell className="font-medium text-sm">
                             {formatDate(stat.recorded_at)}
                           </TableCell>
                           <TableCell>
                             <Badge variant="outline" className="font-mono text-xs">
-                              {formatHashrate(stat.hashrate_1m)}
+                              {formatHashrate(stat.hashrate_1m ?? stat.hashrate_1m_ghs)}
                             </Badge>
                           </TableCell>
-                          <TableCell className="font-mono text-sm">{formatHashrate(stat.hashrate_1d)}</TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {formatHashrate(stat.hashrate_1d ?? stat.hashrate_1d_ghs)}
+                          </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1.5">
                               <Users className="h-3.5 w-3.5 text-muted-foreground" />
@@ -1056,14 +1084,15 @@ export default function MiningDashboard() {
                           <TableCell className="font-mono text-sm">{formatShares(stat.shares)}</TableCell>
                           <TableCell>
                             <Badge
-                              variant={stat.bestshare > 1e9 ? 'default' : stat.bestshare > 1e6 ? 'secondary' : 'outline'}
+                              variant={best > 1e9 ? 'default' : best > 1e6 ? 'secondary' : 'outline'}
                               className="font-mono text-xs"
                             >
-                              {stat.bestshare ? formatNumber(stat.bestshare) : '0'}
+                              {best ? formatNumber(best) : '0'}
                             </Badge>
                           </TableCell>
                         </TableRow>
-                      ))}
+                          )
+                        })}
                     </TableBody>
                   </Table>
                 </div>

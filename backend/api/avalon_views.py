@@ -20,8 +20,11 @@ from .unified_serializers import (
     UnifiedMiningAsAvalonSerializer,
     UnifiedSystemAsAvalonSerializer,
 )
+from .views import _parse_int_param
 
 logger = logging.getLogger(__name__)
+
+_MAX_HOURS = 24 * 90
 
 
 @api_view(['GET'])
@@ -195,8 +198,8 @@ def avalon_mining_stats(request):
     """Mining statistics for Avalon devices from unified tables."""
     try:
         device_id = request.GET.get('device_id')
-        hours = int(request.GET.get('hours', 24))
-        limit = int(request.GET.get('limit', 100))
+        hours = _parse_int_param(request.GET.get('hours', 24), 24, min_value=1, max_value=_MAX_HOURS)
+        limit = _parse_int_param(request.GET.get('limit', 100), 100, min_value=1, max_value=5000)
         end_time = timezone.now()
         start_time = end_time - timedelta(hours=hours)
 
@@ -223,8 +226,8 @@ def avalon_hardware_logs(request):
     """Hardware logs for Avalon devices from unified tables."""
     try:
         device_id = request.GET.get('device_id')
-        hours = int(request.GET.get('hours', 24))
-        limit = int(request.GET.get('limit', 100))
+        hours = _parse_int_param(request.GET.get('hours', 24), 24, min_value=1, max_value=_MAX_HOURS)
+        limit = _parse_int_param(request.GET.get('limit', 100), 100, min_value=1, max_value=5000)
         end_time = timezone.now()
         start_time = end_time - timedelta(hours=hours)
 
@@ -251,7 +254,7 @@ def avalon_hashrate_trends(request):
     """Hashrate trend points for Avalon devices."""
     try:
         device_id = request.GET.get('device_id')
-        hours = int(request.GET.get('hours', 24))
+        hours = _parse_int_param(request.GET.get('hours', 24), 24, min_value=1, max_value=_MAX_HOURS)
         start_time = timezone.now() - timedelta(hours=hours)
         query = DeviceMiningStats.objects.filter(
             device__make=Device.MAKE_AVALON,
@@ -286,7 +289,7 @@ def avalon_temperature_trends(request):
     """Temperature / power trends for Avalon devices."""
     try:
         device_id = request.GET.get('device_id')
-        hours = int(request.GET.get('hours', 24))
+        hours = _parse_int_param(request.GET.get('hours', 24), 24, min_value=1, max_value=_MAX_HOURS)
         start_time = timezone.now() - timedelta(hours=hours)
         query = DeviceHardwareStats.objects.filter(
             device__make=Device.MAKE_AVALON,

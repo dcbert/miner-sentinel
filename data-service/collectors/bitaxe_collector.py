@@ -17,6 +17,7 @@ from collectors.normalized import (
     NormalizedDeviceSnapshot,
     SystemMetrics,
     efficiency_j_per_th,
+    was_device_online,
 )
 from notifications.discord_notifier import DiscordNotifier
 from notifications.telegram_notifier import TelegramNotifier
@@ -174,13 +175,17 @@ class BitAxeCollector:
             conn.close()
 
     def update_device_status(self, device_id, device_ip, is_online, error_message=""):
-        """Update device online/offline status and send notifications if needed."""
+        """Update device online/offline status and send notifications if needed.
+
+        Previous reachability is inferred from error_message + last_seen_at,
+        not is_active (which only means the device is enabled for collection).
+        """
         conn = self.get_db_connection()
         cursor = conn.cursor()
 
         try:
             cursor.execute("""
-                SELECT is_active, last_seen_at, name
+                SELECT error_message, last_seen_at, name
                 FROM devices
                 WHERE make = %s AND device_id = %s
             """, (self.MAKE, device_id))
@@ -189,7 +194,7 @@ class BitAxeCollector:
             if not result:
                 # Fallback to legacy table for status notifications
                 cursor.execute("""
-                    SELECT is_active, last_seen_at, device_name
+                    SELECT error_message, last_seen_at, device_name
                     FROM bitaxe_devices
                     WHERE device_id = %s
                 """, (device_id,))
@@ -197,10 +202,12 @@ class BitAxeCollector:
                 if not result:
                     return
 
-            current_status, last_seen, device_name = result
+            prev_error, last_seen, device_name = result
+            previously_online = was_device_online(prev_error, last_seen)
             self.writer.update_device_status(self.MAKE, device_id, is_online, error_message)
 
-            if current_status and not is_online:
+            # Transition: online → offline (only once per outage)
+            if previously_online and not is_online:
                 last_seen_str = last_seen.strftime("%Y-%m-%d %H:%M:%S") if last_seen else "Unknown"
                 logger.warning(f"Device {device_id} went offline. Last seen: {last_seen_str}")
                 self.telegram_notifier.send_device_offline_alert(
@@ -210,14 +217,12 @@ class BitAxeCollector:
                     device_id, device_name or device_id, last_seen_str, error_message
                 )
 
-            elif not current_status and is_online:
-                if last_seen:
-                    if last_seen.tzinfo is None:
-                        last_seen = last_seen.replace(tzinfo=timezone.utc)
-                    offline_duration = datetime.now(timezone.utc) - last_seen
-                    duration_str = self._format_duration(offline_duration)
-                else:
-                    duration_str = "Unknown"
+            # Transition: offline → online (device had prior contact with an error)
+            elif not previously_online and is_online and last_seen is not None:
+                if last_seen.tzinfo is None:
+                    last_seen = last_seen.replace(tzinfo=timezone.utc)
+                offline_duration = datetime.now(timezone.utc) - last_seen
+                duration_str = self._format_duration(offline_duration)
 
                 logger.info(f"Device {device_id} came back online after {duration_str}")
                 self.telegram_notifier.send_device_online_alert(

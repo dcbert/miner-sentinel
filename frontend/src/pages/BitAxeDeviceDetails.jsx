@@ -27,6 +27,9 @@ import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import api from '@/lib/api'
+import { isDeviceOnline } from '@/lib/devices'
+import { useTimeRange } from '@/lib/TimeRangeContext'
+import { formatRangeWindow, toHoursParams } from '@/lib/timeRange'
 
 // ============================================
 // HELPER COMPONENTS
@@ -116,6 +119,7 @@ export default function BitAxeDeviceDetails() {
   const { deviceId, make: makeParam } = useParams()
   const make = makeParam || 'bitaxe'
   const navigate = useNavigate()
+  const { range } = useTimeRange()
   const [deviceData, setDeviceData] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -124,17 +128,19 @@ export default function BitAxeDeviceDetails() {
     // Poll for new data every 2 minutes
     const interval = setInterval(fetchDeviceDetails, 120000)
     return () => clearInterval(interval)
-  }, [deviceId, make])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceId, make, range.key, range.from?.getTime?.(), range.to?.getTime?.(), range.hours])
 
   const fetchDeviceDetails = async () => {
     try {
       setLoading(true)
+      const params = toHoursParams(range)
       // Prefer unified details endpoint; fall back to legacy Bitaxe system path
       try {
-        const response = await api.get(`/api/devices/${make}/${deviceId}/details/`)
+        const response = await api.get(`/api/devices/${make}/${deviceId}/details/`, { params })
         setDeviceData(response.data)
       } catch {
-        const response = await api.get(`/api/bitaxe/system/device/${deviceId}/`)
+        const response = await api.get(`/api/bitaxe/system/device/${deviceId}/`, { params })
         setDeviceData(response.data)
       }
     } catch (error) {
@@ -290,16 +296,20 @@ export default function BitAxeDeviceDetails() {
                 <span className="mx-1 sm:mx-2">•</span>
                 <span className="font-mono">{device.ip_address}</span>
               </p>
+              <p className="text-[10px] text-muted-foreground/80 mt-0.5">
+                Charts: {range.label.toLowerCase()}
+                <span className="hidden sm:inline"> · {formatRangeWindow(range)}</span>
+              </p>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-3 self-end sm:self-auto">
           <Badge
-            variant={device.is_active ? 'default' : 'destructive'}
+            variant={isDeviceOnline(device) ? 'default' : 'destructive'}
             className="px-2 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm"
           >
-            <StatusIndicator status={device.is_active ? 'online' : 'offline'} size="sm" />
-            <span className="ml-1.5 sm:ml-2">{device.is_active ? 'Online' : 'Offline'}</span>
+            <StatusIndicator status={isDeviceOnline(device) ? 'online' : 'offline'} size="sm" />
+            <span className="ml-1.5 sm:ml-2">{isDeviceOnline(device) ? 'Online' : 'Offline'}</span>
           </Badge>
           <Button variant="outline" size="sm" onClick={fetchDeviceDetails} disabled={loading} className="h-8 sm:h-9">
             <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -405,7 +415,7 @@ export default function BitAxeDeviceDetails() {
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle className="text-lg">Hashrate Trend</CardTitle>
-                    <CardDescription>24-hour mining performance</CardDescription>
+                    <CardDescription>Mining performance · {range.label.toLowerCase()}</CardDescription>
                   </div>
                   <Badge variant="secondary" className="font-mono">
                     {latest_mining?.hashrate_ghs?.toFixed(2)} GH/s

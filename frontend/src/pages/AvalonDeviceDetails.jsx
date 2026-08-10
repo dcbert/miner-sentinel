@@ -23,6 +23,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
+import { isDeviceOnline } from '@/lib/devices';
+import { useTimeRange } from '@/lib/TimeRangeContext';
+import { formatRangeWindow, toHoursParams } from '@/lib/timeRange';
 
 // Status indicator with animated pulse
 const StatusIndicator = ({ isActive }) => (
@@ -80,6 +83,7 @@ const HealthBar = ({ label, value, max, unit = '', thresholds = { warning: 70, d
 export default function AvalonDeviceDetails() {
   const { deviceId } = useParams()
   const navigate = useNavigate()
+  const { range } = useTimeRange()
   const [deviceData, setDeviceData] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -88,20 +92,22 @@ export default function AvalonDeviceDetails() {
     // Poll for new data every 2 minutes
     const interval = setInterval(fetchDeviceDetails, 120000)
     return () => clearInterval(interval)
-  }, [deviceId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceId, range.key, range.from?.getTime?.(), range.to?.getTime?.(), range.hours])
 
   const fetchDeviceDetails = async () => {
     try {
       setLoading(true)
+      const hoursParams = toHoursParams(range)
       // Prefer unified details + history; fall back to legacy Avalon endpoints
       try {
         const [detailsRes, miningHistoryResponse, hardwareHistoryResponse] = await Promise.all([
-          api.get(`/api/devices/avalon/${deviceId}/details/`),
-          api.get(`/api/mining/?device_id=${deviceId}&make=avalon`).catch(() =>
-            api.get(`/api/avalon/mining-stats/?device_id=${deviceId}&limit=20`)
+          api.get(`/api/devices/avalon/${deviceId}/details/`, { params: hoursParams }),
+          api.get(`/api/mining/?device_id=${deviceId}&make=avalon`, { params: hoursParams }).catch(() =>
+            api.get(`/api/avalon/mining-stats/?device_id=${deviceId}`, { params: { ...hoursParams, limit: 500 } })
           ),
-          api.get(`/api/hardware/?device_id=${deviceId}&make=avalon`).catch(() =>
-            api.get(`/api/avalon/hardware-logs/?device_id=${deviceId}&limit=20`)
+          api.get(`/api/hardware/?device_id=${deviceId}&make=avalon`, { params: hoursParams }).catch(() =>
+            api.get(`/api/avalon/hardware-logs/?device_id=${deviceId}`, { params: { ...hoursParams, limit: 500 } })
           ),
         ])
         const d = detailsRes.data
@@ -113,17 +119,19 @@ export default function AvalonDeviceDetails() {
           latest_system_info: d.latest_system,
           mining_history: unwrapHistory(miningHistoryResponse.data) || d.hashrate_trend_24h || [],
           hardware_history: unwrapHistory(hardwareHistoryResponse.data) || d.temperature_trend_24h || [],
+          range_label: range.label,
         })
       } catch {
         const [deviceResponse, miningHistoryResponse, hardwareHistoryResponse] = await Promise.all([
           api.get(`/api/avalon/devices/${deviceId}/`),
-          api.get(`/api/avalon/mining-stats/?device_id=${deviceId}&limit=20`),
-          api.get(`/api/avalon/hardware-logs/?device_id=${deviceId}&limit=20`),
+          api.get(`/api/avalon/mining-stats/?device_id=${deviceId}`, { params: { ...hoursParams, limit: 500 } }),
+          api.get(`/api/avalon/hardware-logs/?device_id=${deviceId}`, { params: { ...hoursParams, limit: 500 } }),
         ])
         setDeviceData({
           ...deviceResponse.data,
           mining_history: miningHistoryResponse.data || [],
           hardware_history: hardwareHistoryResponse.data || [],
+          range_label: range.label,
         })
       }
     } catch (error) {
@@ -299,15 +307,19 @@ export default function AvalonDeviceDetails() {
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-lg sm:text-2xl font-bold truncate">{device.device_name || `Avalon ${deviceId}`}</h1>
                 <Badge
-                  variant={device.is_active ? "default" : "destructive"}
+                  variant={isDeviceOnline(device) ? "default" : "destructive"}
                   className="flex items-center gap-1 sm:gap-1.5 text-xs"
                 >
-                  <StatusIndicator isActive={device.is_active} />
-                  {device.is_active ? "Online" : "Offline"}
+                  <StatusIndicator isActive={isDeviceOnline(device)} />
+                  {isDeviceOnline(device) ? "Online" : "Offline"}
                 </Badge>
               </div>
               <p className="text-xs sm:text-sm text-muted-foreground">
                 {device.device_id} • {device.ip_address}
+              </p>
+              <p className="text-[10px] text-muted-foreground/80 mt-0.5">
+                Charts: {range.label.toLowerCase()}
+                <span className="hidden sm:inline"> · {formatRangeWindow(range)}</span>
               </p>
             </div>
           </div>
@@ -620,8 +632,8 @@ export default function AvalonDeviceDetails() {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">System Status</p>
-                    <Badge variant={device.is_active ? "default" : "destructive"} className="mt-1">
-                      {device.is_active ? "Healthy" : "Offline"}
+                    <Badge variant={isDeviceOnline(device) ? "default" : "destructive"} className="mt-1">
+                      {isDeviceOnline(device) ? "Healthy" : "Offline"}
                     </Badge>
                     <p className="text-xs text-muted-foreground mt-1">
                       {formatDate(latestHardware.recorded_at)}
@@ -691,7 +703,7 @@ export default function AvalonDeviceDetails() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-lg">Hashrate Trend</CardTitle>
-                  <CardDescription>Historical mining performance</CardDescription>
+                  <CardDescription>Mining performance · {range.label.toLowerCase()}</CardDescription>
                 </div>
                 <Badge variant="secondary" className="font-mono">
                   {formatHashrate(latestMining.hashrate_ghs)}

@@ -25,6 +25,25 @@ export function unwrapList(data) {
   return []
 }
 
+/**
+ * Whether a device is currently reachable.
+ *
+ * `is_active` only means "enabled for collection". Reachability comes from the
+ * collector: successful polls clear `error_message` and set `last_seen_at`;
+ * failed polls set `error_message` and leave `last_seen_at` unchanged.
+ *
+ * @param {object|null|undefined} device
+ * @returns {boolean}
+ */
+export function isDeviceOnline(device) {
+  if (!device) return false
+  if (device.is_active === false) return false
+  if (device.error_message) return false
+  if (!device.last_seen_at) return false
+  const lastSeen = new Date(device.last_seen_at).getTime()
+  return Number.isFinite(lastSeen)
+}
+
 /** Path to device detail page. */
 export function deviceDetailPath(make, deviceId) {
   return `/devices/${make}/${deviceId}`

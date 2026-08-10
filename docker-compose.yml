@@ -2,7 +2,6 @@ version: '3.8'
 
 services:
   postgres:
-    # Match Umbrel / production dumps (pg_restore from PG 17 requires server ≥ 17)
     image: postgres:17-alpine
     container_name: minersentinel-postgres
     restart: unless-stopped

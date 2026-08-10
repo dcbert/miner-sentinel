@@ -2,6 +2,7 @@ import Layout from '@/components/layout/Layout';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
+import { TimeRangeProvider } from '@/lib/TimeRangeContext';
 import AnalyticsDashboard from '@/pages/AnalyticsDashboard';
 import AvalonDeviceDetails from '@/pages/AvalonDeviceDetails';
 import BitAxeDeviceDetails from '@/pages/BitAxeDeviceDetails';
@@ -29,20 +30,22 @@ function AppRoutes() {
   }
 
   return (
-    <Layout>
-      <Routes>
-        <Route path="/" element={<OverviewDashboard />} />
-        <Route path="/mining" element={<MiningDashboard />} />
-        {/* Unified device detail */}
-        <Route path="/devices/:make/:deviceId" element={<DeviceDetails />} />
-        {/* Legacy detail routes (still supported) */}
-        <Route path="/bitaxe/device/:deviceId" element={<BitAxeDeviceDetails />} />
-        <Route path="/avalon/device/:deviceId" element={<AvalonDeviceDetails />} />
-        <Route path="/analytics" element={<AnalyticsDashboard />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Layout>
+    <TimeRangeProvider>
+      <Layout>
+        <Routes>
+          <Route path="/" element={<OverviewDashboard />} />
+          <Route path="/mining" element={<MiningDashboard />} />
+          {/* Unified device detail */}
+          <Route path="/devices/:make/:deviceId" element={<DeviceDetails />} />
+          {/* Legacy detail routes (still supported) */}
+          <Route path="/bitaxe/device/:deviceId" element={<BitAxeDeviceDetails />} />
+          <Route path="/avalon/device/:deviceId" element={<AvalonDeviceDetails />} />
+          <Route path="/analytics" element={<AnalyticsDashboard />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Layout>
+    </TimeRangeProvider>
   )
 }
 

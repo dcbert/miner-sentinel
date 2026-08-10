@@ -19,6 +19,7 @@ from collectors.normalized import (
     NormalizedDeviceSnapshot,
     SystemMetrics,
     efficiency_j_per_th,
+    was_device_online,
 )
 from notifications.discord_notifier import DiscordNotifier
 from notifications.telegram_notifier import TelegramNotifier
@@ -73,14 +74,14 @@ class AvalonCollector:
         return psycopg2.connect(self.database_url)
 
     @retry(stop_max_attempt_number=3, wait_exponential_multiplier=1000, wait_exponential_max=10000)
-    def _socket_request(self, ip, command, timeout=10):
+    def _socket_request(self, ip, command, timeout=10, port=4028):
         """Make TCP socket request to Avalon device using cgminer API."""
         sock = None
         try:
-            # Create socket connection to cgminer API (port 4028)
+            # Create socket connection to cgminer API (default port 4028)
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(timeout)
-            sock.connect((ip, 4028))
+            sock.connect((ip, int(port or 4028)))
 
             # Send command in JSON format as required by cgminer API
             command_json = json.dumps({"command": command})
@@ -239,14 +240,18 @@ class AvalonCollector:
             conn.close()
 
     def update_device_status(self, device_id, device_ip, is_online, error_message=""):
-        """Update device online/offline status and send notifications if needed."""
+        """Update device online/offline status and send notifications if needed.
+
+        Previous reachability is inferred from error_message + last_seen_at,
+        not is_active (which only means the device is enabled for collection).
+        """
         conn = self.get_db_connection()
         cursor = conn.cursor()
 
         try:
             cursor.execute(
                 """
-                SELECT is_active, last_seen_at, name
+                SELECT error_message, last_seen_at, name
                 FROM devices
                 WHERE make = %s AND device_id = %s
             """,
@@ -257,7 +262,7 @@ class AvalonCollector:
             if not result:
                 cursor.execute(
                     """
-                    SELECT is_active, last_seen_at, device_name
+                    SELECT error_message, last_seen_at, device_name
                     FROM avalon_devices
                     WHERE device_id = %s
                 """,
@@ -267,28 +272,36 @@ class AvalonCollector:
                 if not result:
                     return
 
-            current_status, last_seen, device_name = result
+            prev_error, last_seen, device_name = result
+            previously_online = was_device_online(prev_error, last_seen)
             self.writer.update_device_status(self.MAKE, device_id, is_online, error_message)
 
-            if current_status and not is_online:
+            # Transition: online → offline (only once per outage)
+            if previously_online and not is_online:
                 last_seen_str = last_seen.strftime("%Y-%m-%d %H:%M:%S") if last_seen else "Unknown"
                 logger.warning(f"Device {device_id} went offline. Last seen: {last_seen_str}")
-                self.telegram_notifier.send_device_offline_alert(device_id, device_name or device_id, last_seen_str, error_message)
-                self.discord_notifier.send_device_offline_alert(device_id, device_name or device_id, last_seen_str, error_message)
+                self.telegram_notifier.send_device_offline_alert(
+                    device_id, device_name or device_id, last_seen_str, error_message
+                )
+                self.discord_notifier.send_device_offline_alert(
+                    device_id, device_name or device_id, last_seen_str, error_message
+                )
 
-            elif not current_status and is_online:
-                if last_seen:
-                    current_time = datetime.now(timezone.utc)
-                    if last_seen.tzinfo is None:
-                        last_seen = last_seen.replace(tzinfo=timezone.utc)
-                    offline_duration = current_time - last_seen
-                    duration_str = self._format_duration(offline_duration)
-                else:
-                    duration_str = "Unknown"
+            # Transition: offline → online (device had prior contact with an error)
+            elif not previously_online and is_online and last_seen is not None:
+                current_time = datetime.now(timezone.utc)
+                if last_seen.tzinfo is None:
+                    last_seen = last_seen.replace(tzinfo=timezone.utc)
+                offline_duration = current_time - last_seen
+                duration_str = self._format_duration(offline_duration)
 
                 logger.info(f"Device {device_id} came back online after {duration_str}")
-                self.telegram_notifier.send_device_online_alert(device_id, device_name or device_id, duration_str)
-                self.discord_notifier.send_device_online_alert(device_id, device_name or device_id, duration_str)
+                self.telegram_notifier.send_device_online_alert(
+                    device_id, device_name or device_id, duration_str
+                )
+                self.discord_notifier.send_device_online_alert(
+                    device_id, device_name or device_id, duration_str
+                )
 
         except Exception as e:
             logger.error(f"Error updating device status for {device_id}: {e}")
@@ -538,13 +551,14 @@ class AvalonCollector:
             ),
         )
 
-    def collect_device_data(self, device_id, device_ip):
+    def collect_device_data(self, device_id, device_ip, port=None):
         """Collect mining and hardware data from a single Avalon device."""
+        api_port = int(port or 4028)
         try:
-            version_info = self._socket_request(device_ip, 'version')
-            summary_info = self._socket_request(device_ip, 'summary')
-            stats_info = self._socket_request(device_ip, 'estats')
-            pools_info = self._socket_request(device_ip, 'pools')
+            version_info = self._socket_request(device_ip, 'version', port=api_port)
+            summary_info = self._socket_request(device_ip, 'summary', port=api_port)
+            stats_info = self._socket_request(device_ip, 'estats', port=api_port)
+            pools_info = self._socket_request(device_ip, 'pools', port=api_port)
 
             conn = self.get_db_connection()
             cursor = conn.cursor()
@@ -600,5 +614,6 @@ class AvalonCollector:
         for device in self.devices:
             device_id = device['device_id']
             device_ip = device['ip_address']
-            logger.info(f"Collecting data for Avalon device: {device_id} at {device_ip}")
-            self.collect_device_data(device_id, device_ip)
+            port = device.get('port') or 4028
+            logger.info(f"Collecting data for Avalon device: {device_id} at {device_ip}:{port}")
+            self.collect_device_data(device_id, device_ip, port=port)

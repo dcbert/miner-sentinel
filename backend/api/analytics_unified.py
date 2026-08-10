@@ -23,6 +23,23 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
+# Cap query windows to protect large installs (matches fleet endpoints: 90 days)
+_MAX_HOURS = 24 * 90
+_MAX_DAYS = 90
+
+
+def _parse_int_param(value, default, min_value=1, max_value=None):
+    """Safely parse a positive integer query param with optional bounds."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    if n < min_value:
+        n = min_value
+    if max_value is not None and n > max_value:
+        n = max_value
+    return n
+
 
 def _format_difficulty(value):
     if not value or value <= 0:
@@ -58,8 +75,8 @@ def _make_label(make: str) -> str:
 @permission_classes([IsAuthenticated])
 def overview_analytics(request):
     """Fleet overview KPIs from unified tables."""
-    hours = int(request.query_params.get('hours', 24))
-    days = int(request.query_params.get('days', 7))
+    hours = _parse_int_param(request.query_params.get('hours', 24), 24, min_value=1, max_value=_MAX_HOURS)
+    days = _parse_int_param(request.query_params.get('days', 7), 7, min_value=1, max_value=_MAX_DAYS)
     start_time_hours = timezone.now() - timedelta(hours=hours)
     start_time_days = timezone.now() - timedelta(days=days)
 
@@ -429,8 +446,8 @@ def overview_analytics(request):
 @permission_classes([IsAuthenticated])
 def detailed_analytics(request):
     """Analytics dashboard data from unified tables."""
-    hours = int(request.query_params.get('hours', 24))
-    days = int(request.query_params.get('days', 7))
+    hours = _parse_int_param(request.query_params.get('hours', 24), 24, min_value=1, max_value=_MAX_HOURS)
+    days = _parse_int_param(request.query_params.get('days', 7), 7, min_value=1, max_value=_MAX_DAYS)
     start_time_hours = timezone.now() - timedelta(hours=hours)
     start_time_days = timezone.now() - timedelta(days=days)
 
@@ -525,9 +542,9 @@ def detailed_analytics(request):
         expected_hours = expected_days = 0
         prob_beat_1h = prob_beat_24h = prob_beat_7d = 0
 
-    thirty_days_ago = timezone.now() - timedelta(days=30)
+    history_start = timezone.now() - timedelta(days=days)
     recent_bests = (
-        DeviceMiningStats.objects.filter(recorded_at__gte=thirty_days_ago)
+        DeviceMiningStats.objects.filter(recorded_at__gte=history_start)
         .filter(
             Q(best_difficulty__isnull=False, best_difficulty__gt=0)
             | Q(best_session_difficulty__isnull=False, best_session_difficulty__gt=0)

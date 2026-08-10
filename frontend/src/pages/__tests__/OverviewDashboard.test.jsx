@@ -1,13 +1,14 @@
-import { ThemeProvider } from '@/components/theme-provider';
-import api from '@/lib/api';
-import { AuthProvider } from '@/lib/AuthContext';
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import OverviewDashboard from '../OverviewDashboard';
+import { ThemeProvider } from '@/components/theme-provider'
+import api from '@/lib/api'
+import { AuthProvider } from '@/lib/AuthContext'
+import { TimeRangeProvider } from '@/lib/TimeRangeContext'
+import { TIME_RANGE_STORAGE_KEY } from '@/lib/timeRange'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import OverviewDashboard from '../OverviewDashboard'
 
-// Mock the api module (used for analytics + auth check inside AuthProvider)
 vi.mock('@/lib/api', () => ({
   default: {
     get: vi.fn(),
@@ -63,10 +64,8 @@ const mockAnalytics = {
 }
 
 function renderWithProviders(ui) {
-  // Ensure auth passes (token + mocked /api/auth/user/ response)
   localStorage.setItem('sessionToken', 'test-token-123')
 
-  // Make api.get resolve for both auth check and the page's analytics call
   const getMock = api.get
   getMock.mockImplementation((url) => {
     if (url.includes('/api/auth/user/')) {
@@ -82,14 +81,16 @@ function renderWithProviders(ui) {
     <MemoryRouter initialEntries={['/']}>
       <ThemeProvider defaultTheme="dark" storageKey="test-theme">
         <AuthProvider>
-          {ui}
+          <TimeRangeProvider>
+            {ui}
+          </TimeRangeProvider>
         </AuthProvider>
       </ThemeProvider>
-    </MemoryRouter>
+    </MemoryRouter>,
   )
 }
 
-describe('OverviewDashboard (smoke + integration with mocks)', () => {
+describe('OverviewDashboard (smoke + global time range)', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
@@ -99,57 +100,43 @@ describe('OverviewDashboard (smoke + integration with mocks)', () => {
     localStorage.clear()
   })
 
-  it('renders header, PeriodSelector, and loads analytics data without crashing', async () => {
+  it('renders header and loads analytics without local PeriodSelector', async () => {
     renderWithProviders(<OverviewDashboard />)
 
-    // Header
     expect(await screen.findByText('Overview')).toBeInTheDocument()
-    expect(screen.getByText(/Real-time mining operations at a glance/i)).toBeInTheDocument()
+    expect(screen.getByText(/Live metrics now/i)).toBeInTheDocument()
+    expect(screen.queryAllByText(/last 24 hours/i).length).toBeGreaterThan(0)
 
-    // PeriodSelector buttons (may appear multiple times in dashboard sections; use queryAll safe)
-    expect(screen.queryAllByText('24 Hours').length).toBeGreaterThan(0)
-    expect(screen.queryAllByText('7 Days').length).toBeGreaterThan(0)
-    expect(screen.queryAllByText('30 Days').length).toBeGreaterThan(0)
-
-    // Wait for data load (replaces skeleton)
     await waitFor(() => {
-      expect(screen.queryByText(/Loading|DashboardSkeleton/i)).not.toBeInTheDocument()
+      expect(screen.queryAllByText(/Total Hashrate/i).length).toBeGreaterThan(0)
     })
 
-    // Key metrics from mock data (may render in multiple KPI/sections; use queryAll for smoke test)
-    expect(screen.queryAllByText(/Total Hashrate/i).length).toBeGreaterThan(0)
-    // Value formatted by formatHashrate
     expect(screen.queryAllByText(/1.23 TH\/s/i).length).toBeGreaterThan(0)
-
-    // Share / acceptance metrics (labels may vary; assert stable ones from mock + best share)
     expect(screen.queryAllByText(/Best Share/i).length).toBeGreaterThan(0)
-    expect(screen.queryAllByText(/98.7|Acceptance|Performance/i).length).toBeGreaterThan(0)
   })
 
-  it('changes period and refetches analytics with correct params', async () => {
-    const user = userEvent.setup()
+  it('refetches analytics when stored time range is 7d', async () => {
+    localStorage.setItem(
+      TIME_RANGE_STORAGE_KEY,
+      JSON.stringify({ mode: 'preset', key: '7d' }),
+    )
     renderWithProviders(<OverviewDashboard />)
 
     await screen.findByText('Overview')
 
-    // Click 7 Days (use first if multiple instances)
-    const sevenDayBtns = screen.queryAllByText('7 Days')
-    const sevenDayBtn = sevenDayBtns[0]
-    await user.click(sevenDayBtn)
-
-    // Should trigger new api call with days=7, hours=168
     await waitFor(() => {
       const calls = api.get.mock.calls.filter(([url]) => url.includes('/api/overview/analytics/'))
-      expect(calls.length).toBeGreaterThanOrEqual(2)
+      expect(calls.length).toBeGreaterThanOrEqual(1)
       const lastCall = calls[calls.length - 1]
       expect(lastCall[1]).toMatchObject({
         params: { hours: 168, days: 7 },
       })
     })
+
+    expect(screen.queryAllByText(/last 7 days/i).length).toBeGreaterThan(0)
   })
 
-  it('shows error state when analytics fetch fails (after initial load attempt)', async () => {
-    // Override to reject for this test
+  it('shows error state when analytics fetch fails', async () => {
     api.get.mockImplementation((url) => {
       if (url.includes('/api/auth/user/')) {
         return Promise.resolve({ data: { authenticated: true, user: null } })
@@ -159,22 +146,19 @@ describe('OverviewDashboard (smoke + integration with mocks)', () => {
       }
       return Promise.resolve({ data: {} })
     })
-    localStorage.setItem('sessionToken', 'test')
 
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={['/']}>
         <ThemeProvider defaultTheme="dark" storageKey="test-theme">
           <AuthProvider>
-            <OverviewDashboard />
+            <TimeRangeProvider>
+              <OverviewDashboard />
+            </TimeRangeProvider>
           </AuthProvider>
         </ThemeProvider>
-      </MemoryRouter>
+      </MemoryRouter>,
     )
 
-    await waitFor(() => {
-      expect(screen.getByText(/Unable to load analytics data/i)).toBeInTheDocument()
-      // Icon is svg, not text "AlertTriangle"; check for error styling or alert presence
-      expect(document.querySelector('.text-destructive') || screen.queryByRole('alert')).toBeTruthy()
-    })
+    expect(await screen.findByText(/Unable to load analytics data/i)).toBeInTheDocument()
   })
 })

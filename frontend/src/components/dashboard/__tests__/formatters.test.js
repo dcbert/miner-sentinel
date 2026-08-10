@@ -37,6 +37,15 @@ describe('formatHashrate', () => {
   it('returns "0 GH/s" for zero', () => {
     expect(formatHashrate(0)).toBe('0 GH/s')
   })
+  it('returns "0 GH/s" for NaN', () => {
+    expect(formatHashrate(Number.NaN)).toBe('0 GH/s')
+  })
+  it('returns "0 GH/s" for Infinity', () => {
+    expect(formatHashrate(Number.POSITIVE_INFINITY)).toBe('0 GH/s')
+  })
+  it('returns "0 GH/s" for negative values', () => {
+    expect(formatHashrate(-10)).toBe('0 GH/s')
+  })
   it('formats GH/s for small values', () => {
     expect(formatHashrate(450.5)).toBe('450.50 GH/s')
   })
@@ -48,6 +57,12 @@ describe('formatHashrate', () => {
   })
   it('formats PH/s for exactly 2000 TH', () => {
     expect(formatHashrate(2000 * 1000)).toBe('2.00 PH/s')
+  })
+})
+
+describe('formatNumber non-finite', () => {
+  it('returns "0" for NaN', () => {
+    expect(formatNumber(Number.NaN)).toBe('0')
   })
 })
 

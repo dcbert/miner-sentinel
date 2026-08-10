@@ -1,6 +1,7 @@
 import { ThemeProvider } from '@/components/theme-provider';
 import api from '@/lib/api';
 import { AuthProvider } from '@/lib/AuthContext';
+import { TimeRangeProvider } from '@/lib/TimeRangeContext';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,8 +16,26 @@ vi.mock('@/lib/api', () => ({
 }))
 
 const mockDevices = [
-  { id: 1, device_id: 'bitaxe-001', device_name: 'Bitaxe-1', make: 'bitaxe', is_active: true },
-  { id: 2, device_id: 'avalon-001', device_name: 'Avalon-1', make: 'avalon', is_active: true },
+  {
+    id: 1,
+    device_id: 'bitaxe-001',
+    device_name: 'Bitaxe-1',
+    name: 'Bitaxe-1',
+    make: 'bitaxe',
+    is_active: true,
+    last_seen_at: '2026-07-23T12:00:00Z',
+    error_message: null,
+  },
+  {
+    id: 2,
+    device_id: 'avalon-001',
+    device_name: 'Avalon-1',
+    name: 'Avalon-1',
+    make: 'avalon',
+    is_active: true,
+    last_seen_at: '2026-07-23T12:00:00Z',
+    error_message: null,
+  },
 ]
 const mockMiningLatest = [
   {
@@ -65,6 +84,11 @@ function buildMock(overrides = {}) {
     if (url.includes('/api/bitaxe/pool/statistics/')) {
       return Promise.resolve({ data: overrides.statistics !== undefined ? overrides.statistics : null })
     }
+    if (url.includes('/api/bitaxe/pool/hashrate_trend/')) {
+      return Promise.resolve({
+        data: overrides.poolStats !== undefined ? overrides.poolStats : mockPoolStats,
+      })
+    }
     if (url.includes('/api/bitaxe/pool/')) {
       return Promise.resolve({ data: { results: overrides.poolStats !== undefined ? overrides.poolStats : [] } })
     }
@@ -100,7 +124,9 @@ function renderWithProviders(ui, overrides = {}) {
   return render(
     <MemoryRouter>
       <ThemeProvider defaultTheme="dark" storageKey="test-theme">
-        <AuthProvider>{ui}</AuthProvider>
+        <AuthProvider>
+          <TimeRangeProvider>{ui}</TimeRangeProvider>
+        </AuthProvider>
       </ThemeProvider>
     </MemoryRouter>
   )
@@ -184,7 +210,9 @@ describe('MiningDashboard (smoke with API mocks)', () => {
       <MemoryRouter>
         <ThemeProvider defaultTheme="dark" storageKey="test-theme">
           <AuthProvider>
-            <MiningDashboard />
+            <TimeRangeProvider>
+              <MiningDashboard />
+            </TimeRangeProvider>
           </AuthProvider>
         </ThemeProvider>
       </MemoryRouter>

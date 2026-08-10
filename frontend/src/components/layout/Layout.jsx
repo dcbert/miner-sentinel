@@ -1,228 +1,336 @@
+import GlobalTimeRange from '@/components/layout/GlobalTimeRange'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/lib/AuthContext'
+import { isTimeRangeRoute } from '@/lib/timeRange'
 import { cn } from '@/lib/utils'
-import { Activity, ChevronRight, Cpu, Home, LogOut, Menu, Settings, Shield, TrendingUp, X } from 'lucide-react'
+import {
+  Cpu,
+  Home,
+  LogOut,
+  Menu,
+  Settings,
+  TrendingUp,
+  X,
+} from 'lucide-react'
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
+
+/**
+ * App shell design principles (ops / monitoring products):
+ * - Persistent left nav for primary destinations (Linear, Vercel, Grafana)
+ * - Clear visual hierarchy: brand → primary nav → secondary → account
+ * - Active state is calm and scannable (fill + left accent, not neon glow)
+ * - Density for daily use; breathing room without empty “marketing” chrome
+ * - Header holds context tools (time range), not duplicate identity chrome
+ */
+
+const NAV_SECTIONS = [
+  {
+    id: 'monitor',
+    label: 'Monitor',
+    items: [
+      {
+        path: '/',
+        label: 'Overview',
+        icon: Home,
+        match: (p) => p === '/',
+      },
+      {
+        path: '/mining',
+        label: 'Mining',
+        icon: Cpu,
+        match: (p) =>
+          p === '/mining' ||
+          p.startsWith('/mining/') ||
+          p.startsWith('/devices/') ||
+          p.startsWith('/bitaxe/') ||
+          p.startsWith('/avalon/'),
+      },
+      {
+        path: '/analytics',
+        label: 'Analytics',
+        icon: TrendingUp,
+        match: (p) => p === '/analytics' || p.startsWith('/analytics/'),
+      },
+    ],
+  },
+  {
+    id: 'system',
+    label: 'System',
+    items: [
+      {
+        path: '/settings',
+        label: 'Settings',
+        icon: Settings,
+        match: (p) => p === '/settings' || p.startsWith('/settings/'),
+      },
+    ],
+  },
+]
+
+const PAGE_META = {
+  '/': {
+    title: 'Overview',
+    description: 'Fleet health and live performance',
+  },
+  '/mining': {
+    title: 'Mining',
+    description: 'Devices, pool stats, and history',
+  },
+  '/analytics': {
+    title: 'Analytics',
+    description: 'Predictions, energy, and cost',
+  },
+  '/settings': {
+    title: 'Settings',
+    description: 'Devices, pool, and notifications',
+  },
+}
+
+function resolvePageMeta(pathname) {
+  if (PAGE_META[pathname]) return PAGE_META[pathname]
+  if (
+    pathname.startsWith('/devices/') ||
+    pathname.startsWith('/bitaxe/') ||
+    pathname.startsWith('/avalon/')
+  ) {
+    return {
+      title: 'Device',
+      description: 'Hardware detail and trends',
+    }
+  }
+  for (const [path, meta] of Object.entries(PAGE_META)) {
+    if (path !== '/' && pathname.startsWith(path)) return meta
+  }
+  return { title: 'Dashboard', description: null }
+}
+
+function isNavActive(item, pathname) {
+  return item.match(pathname)
+}
 
 export default function Layout({ children }) {
   const location = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const { user, logout } = useAuth()
-
-  const navItems = [
-    { path: '/', label: 'Overview', icon: Home, description: 'System overview' },
-    { path: '/mining', label: 'Mining', icon: Cpu, description: 'Device stats' },
-    { path: '/analytics', label: 'Analytics', icon: TrendingUp, description: 'Performance data' },
-    { path: '/settings', label: 'Settings', icon: Settings, description: 'Configuration' },
-  ]
-
-  const currentPage = navItems.find((item) => item.path === location.pathname)
-  const CurrentIcon = currentPage?.icon || Home
+  const showTimeRange = isTimeRangeRoute(location.pathname)
+  const page = resolvePageMeta(location.pathname)
 
   const handleLogout = () => {
     logout()
     window.location.href = '/login'
   }
 
-  // Get user initials for avatar
-  const getUserInitials = () => {
-    if (user?.username) {
-      return user.username.substring(0, 2).toUpperCase()
-    }
-    return 'U'
-  }
+  const initials = (user?.username || 'U').slice(0, 2).toUpperCase()
 
-  return (
-    <div className="min-h-screen bg-background safe-top safe-bottom">
-      {/* Sidebar */}
-      <aside className={cn(
-        "fixed left-0 top-0 z-40 h-screen w-72 border-r bg-card/50 backdrop-blur-xl transition-transform duration-300 ease-in-out",
-        mobileMenuOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
-      )}>
-        {/* Header with logo */}
-        <div className="flex h-16 items-center justify-between border-b px-5">
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center shadow-lg shadow-primary/25">
-                <Shield className="h-5 w-5 text-primary-foreground" />
-              </div>
-              <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-green-500 border-2 border-card animate-pulse" />
+  const sidebar = (
+    <>
+      {/* Brand */}
+      <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-border/80 px-4">
+        <Link
+          to="/"
+          onClick={() => setMobileMenuOpen(false)}
+          className="group flex min-w-0 items-center gap-2.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        >
+          <img
+            src="/logo.svg"
+            alt=""
+            width={28}
+            height={28}
+            className="h-7 w-7 shrink-0 rounded-md object-cover"
+            draggable={false}
+          />
+          <span className="truncate text-[13px] font-semibold tracking-tight text-foreground">
+            MinerSentinel
+          </span>
+        </Link>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="ml-auto h-8 w-8 shrink-0 md:hidden"
+          onClick={() => setMobileMenuOpen(false)}
+          aria-label="Close menu"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Main">
+        <div className="space-y-5">
+          {NAV_SECTIONS.map((section) => (
+            <div key={section.id}>
+              <p className="mb-1.5 px-2 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground/80">
+                {section.label}
+              </p>
+              <ul className="space-y-0.5">
+                {section.items.map((item) => {
+                  const Icon = item.icon
+                  const active = isNavActive(item, location.pathname)
+                  return (
+                    <li key={item.path}>
+                      <Link
+                        to={item.path}
+                        onClick={() => setMobileMenuOpen(false)}
+                        aria-current={active ? 'page' : undefined}
+                        className={cn(
+                          'group relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13px] outline-none transition-colors',
+                          'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                          active
+                            ? 'bg-accent font-medium text-accent-foreground'
+                            : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground',
+                        )}
+                      >
+                        {/* Active rail — subtle orientation cue */}
+                        <span
+                          className={cn(
+                            'absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full transition-opacity',
+                            active ? 'bg-foreground opacity-100' : 'opacity-0',
+                          )}
+                          aria-hidden
+                        />
+                        <Icon
+                          className={cn(
+                            'h-[15px] w-[15px] shrink-0 transition-opacity',
+                            active ? 'opacity-100' : 'opacity-70 group-hover:opacity-100',
+                          )}
+                          strokeWidth={1.75}
+                        />
+                        <span className="truncate">{item.label}</span>
+                      </Link>
+                    </li>
+                  )
+                })}
+              </ul>
             </div>
-            <div>
-              <h1 className="text-lg font-bold tracking-tight">MinerSentinel</h1>
-              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Mining Monitor</p>
-            </div>
+          ))}
+        </div>
+      </nav>
+
+      {/* Account */}
+      <div className="shrink-0 border-t border-border/80 p-3">
+        <div className="flex items-center gap-2.5 rounded-lg px-1.5 py-1">
+          <div
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-muted text-[11px] font-semibold tabular-nums text-muted-foreground"
+            aria-hidden
+          >
+            {initials}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[13px] font-medium leading-tight text-foreground">
+              {user?.username || 'User'}
+            </p>
+            {user?.email ? (
+              <p className="truncate text-[11px] leading-tight text-muted-foreground">
+                {user.email}
+              </p>
+            ) : (
+              <p className="truncate text-[11px] leading-tight text-muted-foreground">
+                Signed in
+              </p>
+            )}
           </div>
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden h-8 w-8"
-            onClick={() => setMobileMenuOpen(false)}
+            className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={handleLogout}
+            title="Sign out"
+            aria-label="Sign out"
           >
-            <X className="h-4 w-4" />
+            <LogOut className="h-3.5 w-3.5" strokeWidth={1.75} />
           </Button>
         </div>
+      </div>
+    </>
+  )
 
-        {/* Navigation */}
-        <nav className="flex flex-col h-[calc(100vh-4rem)]">
-          <div className="p-3 space-y-1 flex-1">
-            <p className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Navigation
-            </p>
-            {navItems.map((item) => {
-              const Icon = item.icon
-              const isActive = location.pathname === item.path
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={cn(
-                    "group flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all duration-200",
-                    isActive
-                      ? "bg-primary text-primary-foreground shadow-lg shadow-primary/25"
-                      : "hover:bg-accent/50 text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <div className={cn(
-                    "flex items-center justify-center w-9 h-9 rounded-lg transition-colors",
-                    isActive
-                      ? "bg-primary-foreground/20"
-                      : "bg-muted/50 group-hover:bg-accent"
-                  )}>
-                    <Icon className="h-4 w-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">{item.label}</p>
-                    <p className={cn(
-                      "text-[10px] truncate",
-                      isActive ? "text-primary-foreground/70" : "text-muted-foreground"
-                    )}>
-                      {item.description}
-                    </p>
-                  </div>
-                  <ChevronRight className={cn(
-                    "h-4 w-4 opacity-0 -translate-x-2 transition-all",
-                    isActive && "opacity-100 translate-x-0"
-                  )} />
-                </Link>
-              )
-            })}
-          </div>
-
-          {/* Bottom section container */}
-          <div className="mt-auto">
-            {/* Status indicator */}
-            <div className="px-3 py-2">
-              <div className="rounded-xl bg-gradient-to-r from-green-500/10 to-emerald-500/10 border border-green-500/20 p-3">
-                <div className="flex items-center gap-2">
-                  <Activity className="h-4 w-4 text-green-500" />
-                  <span className="text-xs font-medium text-green-600 dark:text-green-400">System Online</span>
-                </div>
-                <p className="text-[10px] text-muted-foreground mt-1">All services running</p>
-              </div>
-            </div>
-
-            {/* User section */}
-            <div className="p-3 border-t bg-muted/30">
-              <div className="flex items-center gap-3 p-2 rounded-xl bg-background/50 mb-2">
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-xl gradient-avatar flex items-center justify-center text-white font-semibold text-sm shadow-md">
-                    {getUserInitials()}
-                  </div>
-                  <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-green-500 border-2 border-background" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-foreground truncate">
-                    {user?.username || 'User'}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground truncate">
-                    {user?.email || 'Administrator'}
-                  </p>
-                </div>
-              </div>
-              <Button
-                variant="ghost"
-                className="w-full justify-start gap-3 h-10 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-xl transition-colors"
-                onClick={handleLogout}
-              >
-                <LogOut className="h-4 w-4" />
-                <span className="text-sm">Sign Out</span>
-              </Button>
-            </div>
-          </div>
-        </nav>
+  return (
+    <div className="min-h-screen bg-background safe-top safe-bottom">
+      {/* Desktop sidebar */}
+      <aside
+        className={cn(
+          'fixed inset-y-0 left-0 z-40 hidden w-60 flex-col border-r border-border/80',
+          'bg-muted/30 dark:bg-muted/20',
+          'md:flex',
+        )}
+      >
+        {sidebar}
       </aside>
 
-      {/* Main content */}
-      <div className="md:pl-72">
-        {/* Mobile Header - integrated hamburger menu */}
-        <header className="sticky top-0 z-30 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 shadow-sm md:hidden">
-          <div className="flex h-14 items-center px-4">
+      {/* Mobile drawer */}
+      <aside
+        className={cn(
+          'fixed inset-y-0 left-0 z-50 flex w-[min(16.5rem,85vw)] flex-col border-r border-border bg-background shadow-xl transition-transform duration-200 ease-out md:hidden',
+          mobileMenuOpen ? 'translate-x-0' : '-translate-x-full',
+        )}
+      >
+        {sidebar}
+      </aside>
+
+      {mobileMenuOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-background/60 backdrop-blur-[2px] md:hidden"
+          onClick={() => setMobileMenuOpen(false)}
+          aria-hidden
+        />
+      )}
+
+      {/* Main column */}
+      <div className="md:pl-60">
+        {/* Mobile header */}
+        <header className="sticky top-0 z-30 border-b border-border/80 bg-background/90 backdrop-blur-md md:hidden">
+          <div className="flex h-14 items-center gap-3 px-3">
             <Button
               variant="ghost"
               size="icon"
               className="h-9 w-9 shrink-0"
               onClick={() => setMobileMenuOpen(true)}
+              aria-label="Open menu"
             >
               <Menu className="h-5 w-5" />
             </Button>
-
-            <div className="flex-1 flex items-center justify-center gap-2">
-              <CurrentIcon className="h-4 w-4 text-primary" />
-              <span className="font-semibold text-base">
-                {currentPage?.label || 'Dashboard'}
-              </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold leading-none">
+                {page.title}
+              </p>
+              {page.description && (
+                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                  {page.description}
+                </p>
+              )}
             </div>
+          </div>
+          {showTimeRange && (
+            <div className="border-t border-border/60 px-3 py-2">
+              <GlobalTimeRange compact className="w-full" />
+            </div>
+          )}
+        </header>
 
-            <div className="h-9 w-9 shrink-0 flex items-center justify-center">
-              <div className="w-7 h-7 rounded-lg gradient-avatar flex items-center justify-center text-white text-xs font-semibold">
-                {getUserInitials()}
+        {/* Desktop header */}
+        <header className="sticky top-0 z-30 hidden border-b border-border/80 bg-background/90 backdrop-blur-md md:block">
+          <div className="flex h-14 items-center justify-between gap-6 px-6">
+            <div className="min-w-0">
+              <h1 className="truncate text-sm font-semibold tracking-tight text-foreground">
+                {page.title}
+              </h1>
+              {page.description && (
+                <p className="truncate text-[12px] text-muted-foreground">
+                  {page.description}
+                </p>
+              )}
+            </div>
+            {showTimeRange && (
+              <div className="shrink-0">
+                <GlobalTimeRange />
               </div>
-            </div>
+            )}
           </div>
         </header>
 
-        {/* Desktop Header */}
-        <header className="sticky top-0 z-30 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 shadow-sm hidden md:block">
-          <div className="flex h-16 items-center justify-between px-6">
-            <div>
-              <h2 className="text-lg font-semibold">{currentPage?.label || 'Dashboard'}</h2>
-              <p className="text-xs text-muted-foreground">{currentPage?.description || 'System overview'}</p>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-muted/50">
-                <div className="w-6 h-6 rounded-md gradient-avatar flex items-center justify-center text-white text-[10px] font-semibold">
-                  {getUserInitials()}
-                </div>
-                <span className="text-sm font-medium">{user?.username || 'User'}</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg"
-                onClick={handleLogout}
-              >
-                <LogOut className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </header>
-
-        <main className="p-3 sm:p-6">
-          {children}
-        </main>
+        <main className="p-4 sm:p-6 lg:p-8">{children}</main>
       </div>
-
-      {/* Mobile overlay */}
-      {mobileMenuOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-background/80 backdrop-blur-sm md:hidden"
-          onClick={() => setMobileMenuOpen(false)}
-        />
-      )}
     </div>
   )
 }

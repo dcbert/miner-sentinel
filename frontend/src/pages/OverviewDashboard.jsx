@@ -16,13 +16,14 @@ import {
     Zap
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useTimeRange } from '@/lib/TimeRangeContext';
+import { formatRangeWindow, toAnalyticsParams } from '@/lib/timeRange';
 
 // Import dashboard components
 import {
     DashboardSkeleton,
     HardwareHealthChart,
     MiningPerformanceChart,
-    PeriodSelector,
     formatAxisHashrate,
     formatAxisPower,
     formatAxisShares,
@@ -115,30 +116,22 @@ function HealthIndicator({ label, value, max, unit = '', status = 'normal', icon
 }
 
 export default function OverviewDashboard() {
+  const { range } = useTimeRange()
   const [analytics, setAnalytics] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [selectedPeriod, setSelectedPeriod] = useState('24h')
-
-  const periods = {
-    '24h': { hours: 24, days: 1, label: '24 Hours' },
-    '7d': { hours: 168, days: 7, label: '7 Days' },
-    '30d': { hours: 720, days: 30, label: '30 Days' },
-  }
 
   useEffect(() => {
     fetchAnalytics()
     const interval = setInterval(fetchAnalytics, 120000)
     return () => clearInterval(interval)
-  }, [selectedPeriod])
+    // Re-fetch when global time range changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range.key, range.from?.getTime?.(), range.to?.getTime?.(), range.hours, range.days])
 
   const fetchAnalytics = async () => {
     try {
-      const period = periods[selectedPeriod]
       const response = await api.get('/api/overview/analytics/', {
-        params: {
-          hours: period.hours,
-          days: period.days,
-        },
+        params: toAnalyticsParams(range),
       })
       setAnalytics(response.data)
     } catch (error) {
@@ -195,7 +188,7 @@ export default function OverviewDashboard() {
       {/* ============================================ */}
       {/* HEADER - Clean and minimal */}
       {/* ============================================ */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
+      <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:items-end">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-primary/10">
             <Activity className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
@@ -203,16 +196,13 @@ export default function OverviewDashboard() {
           <div>
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Overview</h1>
             <p className="text-xs sm:text-sm text-muted-foreground">
-              Real-time mining operations at a glance
+              Live metrics now · charts & period stats for{' '}
+              <span className="text-foreground/80 font-medium">{range.label.toLowerCase()}</span>
+            </p>
+            <p className="text-[10px] text-muted-foreground/80 mt-0.5 hidden sm:block">
+              {formatRangeWindow(range)}
             </p>
           </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <PeriodSelector
-            periods={periods}
-            selectedPeriod={selectedPeriod}
-            onPeriodChange={setSelectedPeriod}
-          />
         </div>
       </div>
 
@@ -375,7 +365,7 @@ export default function OverviewDashboard() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-base font-semibold">Hashrate Performance</CardTitle>
-                  <CardDescription>Mining output over {periods[selectedPeriod].label.toLowerCase()}</CardDescription>
+                  <CardDescription>Mining output over {range.label.toLowerCase()}</CardDescription>
                 </div>
                 <Badge variant="secondary" className="font-mono">
                   {formatHashrate(totalHashrate)}

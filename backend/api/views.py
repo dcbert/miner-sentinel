@@ -42,6 +42,22 @@ from .analytics_unified import detailed_analytics, overview_analytics
 
 logger = logging.getLogger(__name__)
 
+_MAX_HOURS = 24 * 90
+_MAX_DAYS = 90
+
+
+def _parse_int_param(value, default, min_value=1, max_value=None):
+    """Safely parse a positive integer query param with optional bounds."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    if n < min_value:
+        n = min_value
+    if max_value is not None and n > max_value:
+        n = max_value
+    return n
+
 
 def _mirror_unified_to_legacy(device: Device) -> None:
     """Keep legacy registry rows in sync for dual-path collectors/admin."""
@@ -114,12 +130,17 @@ class DeviceViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='details')
     def details(self, request, pk=None):
-        """Full device detail payload (mining, hardware, system, 24h trends)."""
+        """Full device detail payload (mining, hardware, system, trends for selected window)."""
         device = self.get_object()
         latest_mining = DeviceMiningStats.objects.filter(device=device).first()
         latest_hardware = DeviceHardwareStats.objects.filter(device=device).first()
         latest_system = DeviceSystemInfo.objects.filter(device=device).first()
-        start_time = timezone.now() - timedelta(hours=24)
+        # Cap at 90 days to protect large installs; default 24h
+        try:
+            hours = max(1, min(int(request.query_params.get('hours', 24)), 24 * 90))
+        except (TypeError, ValueError):
+            hours = 24
+        start_time = timezone.now() - timedelta(hours=hours)
         hashrate_trend = list(
             DeviceMiningStats.objects.filter(device=device, recorded_at__gte=start_time)
             .values('recorded_at', 'hashrate_ghs', 'shares_accepted', 'shares_rejected')
@@ -146,8 +167,10 @@ class DeviceViewSet(viewsets.ModelViewSet):
             'latest_mining': mining_ser(latest_mining).data if latest_mining else None,
             'latest_hardware': UnifiedHardwareSerializer(latest_hardware).data if latest_hardware else None,
             'latest_system': system_ser(latest_system).data if latest_system else None,
+            # Keep legacy key names for frontend compatibility
             'hashrate_trend_24h': hashrate_trend,
             'temperature_trend_24h': temp_trend,
+            'trend_hours': hours,
         })
 
 
@@ -163,6 +186,13 @@ class FleetMiningViewSet(viewsets.ReadOnlyModelViewSet):
         device_id = self.request.query_params.get('device_id')
         if device_id:
             qs = qs.filter(device__device_id=device_id)
+        hours = self.request.query_params.get('hours')
+        if hours is not None:
+            try:
+                h = max(1, min(int(hours), 24 * 90))
+                qs = qs.filter(recorded_at__gte=timezone.now() - timedelta(hours=h))
+            except (TypeError, ValueError):
+                pass
         return qs
 
     @action(detail=False, methods=['get'])
@@ -197,6 +227,13 @@ class FleetHardwareViewSet(viewsets.ReadOnlyModelViewSet):
         device_id = self.request.query_params.get('device_id')
         if device_id:
             qs = qs.filter(device__device_id=device_id)
+        hours = self.request.query_params.get('hours')
+        if hours is not None:
+            try:
+                h = max(1, min(int(hours), 24 * 90))
+                qs = qs.filter(recorded_at__gte=timezone.now() - timedelta(hours=h))
+            except (TypeError, ValueError):
+                pass
         return qs
 
     @action(detail=False, methods=['get'])
@@ -302,7 +339,7 @@ class BitAxeMiningStatsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def hashrate_trend(self, request):
         device_id = request.query_params.get('device_id')
-        hours = int(request.query_params.get('hours', 24))
+        hours = _parse_int_param(request.query_params.get('hours', 24), 24, min_value=1, max_value=_MAX_HOURS)
         start_time = timezone.now() - timedelta(hours=hours)
         queryset = DeviceMiningStats.objects.filter(
             device__make=Device.MAKE_BITAXE,
@@ -353,7 +390,7 @@ class BitAxeHardwareLogViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def temperature_trend(self, request):
         device_id = request.query_params.get('device_id')
-        hours = int(request.query_params.get('hours', 24))
+        hours = _parse_int_param(request.query_params.get('hours', 24), 24, min_value=1, max_value=_MAX_HOURS)
         start_time = timezone.now() - timedelta(hours=hours)
         queryset = DeviceHardwareStats.objects.filter(
             device__make=Device.MAKE_BITAXE,
@@ -415,7 +452,11 @@ class BitAxeSystemInfoViewSet(viewsets.ReadOnlyModelViewSet):
         latest_hardware = DeviceHardwareStats.objects.filter(device=device).first()
         latest_system = DeviceSystemInfo.objects.filter(device=device).first()
 
-        start_time = timezone.now() - timedelta(hours=24)
+        try:
+            hours = max(1, min(int(request.query_params.get('hours', 24)), 24 * 90))
+        except (TypeError, ValueError):
+            hours = 24
+        start_time = timezone.now() - timedelta(hours=hours)
         hashrate_trend = DeviceMiningStats.objects.filter(
             device=device, recorded_at__gte=start_time
         ).values('recorded_at', 'hashrate_ghs', 'shares_accepted', 'shares_rejected').order_by('recorded_at')
@@ -431,6 +472,7 @@ class BitAxeSystemInfoViewSet(viewsets.ReadOnlyModelViewSet):
             'latest_system': UnifiedSystemAsBitaxeSerializer(latest_system).data if latest_system else None,
             'hashrate_trend_24h': list(hashrate_trend),
             'temperature_trend_24h': list(temp_trend),
+            'trend_hours': hours,
         })
 
 
@@ -443,6 +485,15 @@ class BitAxePoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
         pool_address = self.request.query_params.get('pool_address')
         if pool_address:
             queryset = queryset.filter(pool_address=pool_address)
+        hours = self.request.query_params.get('hours')
+        if hours is not None:
+            try:
+                h = max(1, min(int(hours), 24 * 90))
+                queryset = queryset.filter(
+                    recorded_at__gte=timezone.now() - timedelta(hours=h)
+                )
+            except (TypeError, ValueError):
+                pass
         return queryset
 
     @action(detail=False, methods=['get'])
@@ -459,7 +510,7 @@ class BitAxePoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def hashrate_trend(self, request):
         pool_address = request.query_params.get('pool_address')
-        hours = int(request.query_params.get('hours', 24))
+        hours = _parse_int_param(request.query_params.get('hours', 24), 24, min_value=1, max_value=_MAX_HOURS)
         start_time = timezone.now() - timedelta(hours=hours)
         queryset = PoolStats.objects.filter(recorded_at__gte=start_time)
         if pool_address:
@@ -467,7 +518,7 @@ class BitAxePoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
         stats = queryset.values(
             'recorded_at', 'hashrate_1m_display', 'hashrate_5m_display',
             'hashrate_1h_display', 'hashrate_1d_display',
-            'hashrate_1m_ghs', 'shares', 'workers',
+            'hashrate_1m_ghs', 'hashrate_1d_ghs', 'shares', 'workers', 'best_share',
         ).order_by('recorded_at')
         out = [
             {
@@ -477,8 +528,12 @@ class BitAxePoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
                 'hashrate_1hr': row['hashrate_1h_display'],
                 'hashrate_1d': row['hashrate_1d_display'],
                 'hashrate_1m_ghs': row['hashrate_1m_ghs'],
+                'hashrate_1d_ghs': row['hashrate_1d_ghs'],
                 'shares': row['shares'],
                 'workers': row['workers'],
+                # Legacy frontend aliases
+                'bestshare': row['best_share'],
+                'best_share': row['best_share'],
             }
             for row in stats
         ]
@@ -487,7 +542,7 @@ class BitAxePoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         pool_address = request.query_params.get('pool_address')
-        days = int(request.query_params.get('days', 7))
+        days = _parse_int_param(request.query_params.get('days', 7), 7, min_value=1, max_value=_MAX_DAYS)
         start_date = timezone.now() - timedelta(days=days)
         queryset = PoolStats.objects.filter(recorded_at__gte=start_date)
         if pool_address:

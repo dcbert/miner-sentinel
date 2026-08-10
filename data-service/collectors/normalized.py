@@ -107,6 +107,20 @@ def efficiency_j_per_th(power_watts: Optional[float], hashrate_ghs: Optional[flo
     return power_watts / (hashrate_ghs / 1000.0)
 
 
+def was_device_online(error_message: Optional[str], last_seen_at) -> bool:
+    """
+    Infer previous online state from registry fields.
+
+    `is_active` means "enabled for collection", not reachability. Online state is
+    derived from a successful prior contact (last_seen_at) without an error_message.
+    """
+    if last_seen_at is None:
+        return False
+    if error_message is None:
+        return True
+    return not str(error_message).strip()
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 

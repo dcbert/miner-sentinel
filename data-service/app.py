@@ -335,22 +335,43 @@ def status():
     poll_job = next((j for j in jobs if j.id == 'poll_all_sources'), None)
     next_run = poll_job.next_run_time if poll_job else None
 
-    # Get current device counts from database
+    # Get current device counts from database (prefer unified registry)
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        cursor.execute("SELECT COUNT(*) as count FROM bitaxe_devices WHERE is_active = TRUE")
-        bitaxe_count = cursor.fetchone()['count']
-
-        cursor.execute("SELECT COUNT(*) as count FROM avalon_devices WHERE is_active = TRUE")
-        avalon_count = cursor.fetchone()['count']
-
-        cursor.execute("SELECT device_name, ip_address FROM bitaxe_devices WHERE is_active = TRUE")
-        bitaxe_list = cursor.fetchall()
-
-        cursor.execute("SELECT device_name, ip_address FROM avalon_devices WHERE is_active = TRUE")
-        avalon_list = cursor.fetchall()
+        bitaxe_list = []
+        avalon_list = []
+        try:
+            cursor.execute("""
+                SELECT name AS device_name, ip_address, make, port
+                FROM devices
+                WHERE is_active = TRUE
+            """)
+            for row in cursor.fetchall():
+                entry = {
+                    'name': row['device_name'],
+                    'ip': row['ip_address'],
+                    'port': row.get('port'),
+                }
+                if row['make'] == 'bitaxe':
+                    bitaxe_list.append(entry)
+                elif row['make'] == 'avalon':
+                    avalon_list.append(entry)
+        except Exception as unified_err:
+            logger.warning(f"Unified devices unavailable for status, using legacy: {unified_err}")
+            cursor.execute(
+                "SELECT device_name, ip_address FROM bitaxe_devices WHERE is_active = TRUE"
+            )
+            bitaxe_list = [
+                {'name': d['device_name'], 'ip': d['ip_address']} for d in cursor.fetchall()
+            ]
+            cursor.execute(
+                "SELECT device_name, ip_address FROM avalon_devices WHERE is_active = TRUE"
+            )
+            avalon_list = [
+                {'name': d['device_name'], 'ip': d['ip_address']} for d in cursor.fetchall()
+            ]
 
         cursor.close()
         conn.close()
@@ -362,10 +383,10 @@ def status():
             'ckpool_address': collector_settings.get('ckpool_address', ''),
             'ckpool_url': collector_settings.get('ckpool_url', 'https://eusolo.ckpool.org'),
             'next_run': next_run.isoformat() if next_run else None,
-            'bitaxe_devices_count': bitaxe_count,
-            'avalon_devices_count': avalon_count,
-            'bitaxe_devices': [{'name': d['device_name'], 'ip': d['ip_address']} for d in bitaxe_list],
-            'avalon_devices': [{'name': d['device_name'], 'ip': d['ip_address']} for d in avalon_list]
+            'bitaxe_devices_count': len(bitaxe_list),
+            'avalon_devices_count': len(avalon_list),
+            'bitaxe_devices': bitaxe_list,
+            'avalon_devices': avalon_list,
         })
     except Exception as e:
         logger.error(f"Error getting status: {e}", exc_info=True)
