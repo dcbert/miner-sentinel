@@ -77,19 +77,19 @@ function buildMock(overrides = {}) {
     if (url.includes('/api/auth/user/')) {
       return Promise.resolve({ data: { authenticated: true, user: { id: 1 } } })
     }
-    // Specific pool endpoints FIRST (before generic /api/bitaxe/pool/)
-    if (url.includes('/api/bitaxe/pool/latest/')) {
+    // Specific pool endpoints FIRST (before generic /api/pool/)
+    if (url.includes('/api/pool/latest/')) {
       return Promise.resolve({ data: overrides.latestStats !== undefined ? overrides.latestStats : null })
     }
-    if (url.includes('/api/bitaxe/pool/statistics/')) {
+    if (url.includes('/api/pool/statistics/')) {
       return Promise.resolve({ data: overrides.statistics !== undefined ? overrides.statistics : null })
     }
-    if (url.includes('/api/bitaxe/pool/hashrate_trend/')) {
+    if (url.includes('/api/pool/hashrate_trend/')) {
       return Promise.resolve({
         data: overrides.poolStats !== undefined ? overrides.poolStats : mockPoolStats,
       })
     }
-    if (url.includes('/api/bitaxe/pool/')) {
+    if (url.includes('/api/pool/')) {
       return Promise.resolve({ data: { results: overrides.poolStats !== undefined ? overrides.poolStats : [] } })
     }
     if (url.includes('/api/devices/')) {

@@ -7,6 +7,10 @@
 
 export const TIME_RANGE_STORAGE_KEY = 'minersentinel.timeRange'
 
+/** Match backend MAX_DAYS / MAX_HOURS (protect large installs). */
+export const MAX_TIME_RANGE_DAYS = 90
+export const MAX_TIME_RANGE_HOURS = 24 * MAX_TIME_RANGE_DAYS
+
 /** Ordered presets shown in the picker */
 export const TIME_RANGE_PRESETS = [
   { key: '1h', label: 'Last 1 hour', shortLabel: '1h', hours: 1 },
@@ -17,7 +21,7 @@ export const TIME_RANGE_PRESETS = [
   { key: '90d', label: 'Last 90 days', shortLabel: '90d', hours: 24 * 90 },
 ]
 
-export const DEFAULT_TIME_RANGE_KEY = '24h'
+export const DEFAULT_TIME_RANGE_KEY = '30d'
 
 const PRESET_MAP = Object.fromEntries(TIME_RANGE_PRESETS.map((p) => [p.key, p]))
 
@@ -105,24 +109,43 @@ export function resolveTimeRange(stored, now = new Date()) {
 }
 
 /**
- * Params for overview/analytics APIs that expect hours + days.
- * Uses a single window: both refer to the selected range.
+ * Full time-range query params for APIs.
+ * Always includes hours/days duration plus absolute from/to so custom ranges
+ * (and preset windows resolved at fetch time) apply correctly server-side.
  */
-export function toAnalyticsParams(range) {
-  return {
+export function toTimeRangeParams(range) {
+  if (!range) {
+    return { hours: 24 * 30, days: 30 }
+  }
+  const params = {
     hours: range.hours,
     days: range.days,
   }
+  if (range.from instanceof Date && !Number.isNaN(range.from.getTime())) {
+    params.from = range.from.toISOString()
+  }
+  if (range.to instanceof Date && !Number.isNaN(range.to.getTime())) {
+    params.to = range.to.toISOString()
+  }
+  return params
 }
 
-/** Params for endpoints that only take hours. */
+/**
+ * Params for overview/analytics APIs that expect hours + days (+ from/to).
+ * Uses a single window: both refer to the selected range.
+ */
+export function toAnalyticsParams(range) {
+  return toTimeRangeParams(range)
+}
+
+/** Params for endpoints that primarily take hours (also sends from/to/days). */
 export function toHoursParams(range) {
-  return { hours: range.hours }
+  return toTimeRangeParams(range)
 }
 
-/** Params for endpoints that only take days. */
+/** Params for endpoints that primarily take days (also sends from/to/hours). */
 export function toDaysParams(range) {
-  return { days: range.days }
+  return toTimeRangeParams(range)
 }
 
 /**

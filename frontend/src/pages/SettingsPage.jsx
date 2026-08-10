@@ -17,8 +17,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import NotificationsSettings from '@/components/settings/NotificationsSettings';
 import api from '@/lib/api';
-import { makeLabel, unwrapList } from '@/lib/devices';
+import { makeLabel, SUPPORTED_MAKES, unwrapList } from '@/lib/devices';
 import {
   AlertCircle,
   Bell,
@@ -27,7 +28,6 @@ import {
   Cpu,
   DollarSign,
   Edit,
-  EyeOff,
   Plus,
   RefreshCw,
   Server,
@@ -37,11 +37,6 @@ import {
   WifiOff
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-
-const SUPPORTED_MAKES = [
-  { value: 'bitaxe', label: 'Bitaxe' },
-  { value: 'avalon', label: 'Avalon' },
-]
 
 export default function SettingsPage() {
   // Device management (unified registry)
@@ -64,7 +59,7 @@ export default function SettingsPage() {
     is_active: true,
   })
 
-  // Data collector settings
+  // Data collector + notification settings (shared API singleton)
   const [collectorSettings, setCollectorSettings] = useState({
     polling_interval_minutes: 15,
     device_check_interval_minutes: 5,
@@ -77,17 +72,14 @@ export default function SettingsPage() {
     telegram_bot_token: '',
     telegram_chat_id: '',
     telegram_bot_token_configured: false,
-    // Discord notifications
     discord_enabled: false,
     discord_webhook_url: '',
     discord_webhook_url_configured: false,
-    // Cost analysis settings
+    notification_rules: {},
     energy_rate: 0.12,
     energy_currency: 'USD',
     show_revenue_stats: true,
   })
-  const [showTelegramToken, setShowTelegramToken] = useState(false)
-  const [showDiscordWebhook, setShowDiscordWebhook] = useState(false)
   const [collectorStatus, setCollectorStatus] = useState(null)
   const [savingSettings, setSavingSettings] = useState(false)
 
@@ -126,17 +118,14 @@ export default function SettingsPage() {
           telegram_bot_token: '', // Never returned from API for security
           telegram_chat_id: collectorRes.data.telegram_chat_id || '',
           telegram_bot_token_configured: collectorRes.data.telegram_bot_token_configured || false,
-          // Discord
           discord_enabled: collectorRes.data.discord_enabled || false,
           discord_webhook_url: '', // Never returned from API for security
           discord_webhook_url_configured: collectorRes.data.discord_webhook_url_configured || false,
+          notification_rules: collectorRes.data.notification_rules || {},
           energy_rate: collectorRes.data.energy_rate || 0.12,
           energy_currency: collectorRes.data.energy_currency || 'USD',
           show_revenue_stats: collectorRes.data.show_revenue_stats !== undefined ? collectorRes.data.show_revenue_stats : true,
         })
-        // Reset token/webhook visibility when refreshing
-        setShowTelegramToken(false)
-        setShowDiscordWebhook(false)
       }
     } catch (err) {
       console.error('Error fetching settings data:', err)
@@ -230,13 +219,24 @@ export default function SettingsPage() {
       setSavingSettings(true)
       setError(null)
 
-      await api.post('/api/settings/collector/', collectorSettings)
-      setSuccess('Data collector settings saved successfully')
+      // Do not send empty secrets (keeps existing server-side values)
+      const payload = { ...collectorSettings }
+      if (!payload.telegram_bot_token) delete payload.telegram_bot_token
+      if (!payload.discord_webhook_url) delete payload.discord_webhook_url
 
+      const res = await api.post('/api/settings/collector/', payload)
+      setSuccess(res.data?.message || 'Settings saved successfully')
+      // Refresh so notification_rules merges + configured flags update
+      await fetchData()
       setTimeout(() => setSuccess(null), 3000)
     } catch (err) {
       console.error('Error saving collector settings:', err)
-      setError(err.response?.data?.detail || 'Failed to save collector settings')
+      setError(
+        err.response?.data?.error ||
+          err.response?.data?.detail ||
+          (err.response?.data?.errors && JSON.stringify(err.response.data.errors)) ||
+          'Failed to save settings',
+      )
     } finally {
       setSavingSettings(false)
     }
@@ -401,7 +401,7 @@ export default function SettingsPage() {
       )}
 
       <Tabs defaultValue="devices" className="space-y-6">
-        <TabsList>
+        <TabsList className="w-full overflow-x-auto sm:w-auto">
           <TabsTrigger value="devices">
             <Cpu className="h-4 w-4 mr-2" />
             Devices
@@ -409,6 +409,10 @@ export default function SettingsPage() {
           <TabsTrigger value="collector">
             <Server className="h-4 w-4 mr-2" />
             Data Collector
+          </TabsTrigger>
+          <TabsTrigger value="notifications">
+            <Bell className="h-4 w-4 mr-2" />
+            Notifications
           </TabsTrigger>
         </TabsList>
 
@@ -465,8 +469,12 @@ export default function SettingsPage() {
                 )}
                 <div className="flex items-center gap-2 text-muted-foreground text-xs sm:text-sm">
                   <Cpu className="w-4 h-4" />
-                  {devices.filter((d) => d.make === 'bitaxe').length} Bitaxe,{' '}
-                  {devices.filter((d) => d.make === 'avalon').length} Avalon
+                  {SUPPORTED_MAKES.map((m, i) => (
+                    <span key={m.value}>
+                      {i > 0 ? ', ' : ''}
+                      {devices.filter((d) => d.make === m.value).length} {m.label}
+                    </span>
+                  ))}
                   {' '}({devices.length} total)
                 </div>
               </div>
@@ -663,199 +671,6 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              {/* Telegram Notifications Settings */}
-              <div className="pt-4 border-t space-y-4">
-                <div className="flex items-center gap-2">
-                  <Bell className="h-4 w-4" />
-                  <Label className="text-base font-medium">Telegram Notifications</Label>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="telegram_enabled">Enable Telegram Alerts</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Receive notifications when devices go offline or come back online
-                    </p>
-                  </div>
-                  <Switch
-                    id="telegram_enabled"
-                    checked={collectorSettings.telegram_enabled}
-                    onCheckedChange={(checked) =>
-                      setCollectorSettings({
-                        ...collectorSettings,
-                        telegram_enabled: checked,
-                      })
-                    }
-                  />
-                </div>
-
-                {collectorSettings.telegram_enabled && (
-                  <div className="grid gap-4 grid-cols-1 pl-3 sm:pl-4 border-l-2 border-muted w-full max-w-full">
-                    <div className="space-y-2 min-w-0 overflow-hidden">
-                      <Label htmlFor="telegram_bot_token">Bot Token</Label>
-                      {collectorSettings.telegram_bot_token_configured && !showTelegramToken ? (
-                        <div className="flex gap-2">
-                          <div className="flex-1 flex items-center px-3 py-2 rounded-md border bg-muted/50">
-                            <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">
-                              <CheckCircle2 className="w-3 h-3 mr-1" />
-                              Configured
-                            </Badge>
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => setShowTelegramToken(true)}
-                            title="Change token"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex gap-2">
-                          <Input
-                            id="telegram_bot_token"
-                            type="password"
-                            placeholder="Enter your Telegram Bot Token"
-                            value={collectorSettings.telegram_bot_token}
-                            onChange={(e) =>
-                              setCollectorSettings({
-                                ...collectorSettings,
-                                telegram_bot_token: e.target.value,
-                              })
-                            }
-                          />
-                          {collectorSettings.telegram_bot_token_configured && (
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              onClick={() => {
-                                setShowTelegramToken(false)
-                                setCollectorSettings({
-                                  ...collectorSettings,
-                                  telegram_bot_token: '',
-                                })
-                              }}
-                              title="Cancel"
-                            >
-                              <EyeOff className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        Create a bot via @BotFather on Telegram to get your token
-                      </p>
-                    </div>
-
-                    <div className="space-y-2 min-w-0 overflow-hidden">
-                      <Label htmlFor="telegram_chat_id">Chat ID</Label>
-                      <Input
-                        id="telegram_chat_id"
-                        type="text"
-                        placeholder="e.g., 123456789 or -100123456789"
-                        value={collectorSettings.telegram_chat_id}
-                        onChange={(e) =>
-                          setCollectorSettings({
-                            ...collectorSettings,
-                            telegram_chat_id: e.target.value,
-                          })
-                        }
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Your personal chat ID or group chat ID (use @userinfobot to find it)
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Discord Notifications Settings */}
-              <div className="pt-4 border-t space-y-4">
-                <div className="flex items-center gap-2">
-                  <Bell className="h-4 w-4" />
-                  <Label className="text-base font-medium">Discord Notifications</Label>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="discord_enabled">Enable Discord Alerts</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Receive notifications via Discord webhook when devices go offline or come back online
-                    </p>
-                  </div>
-                  <Switch
-                    id="discord_enabled"
-                    checked={collectorSettings.discord_enabled}
-                    onCheckedChange={(checked) =>
-                      setCollectorSettings({
-                        ...collectorSettings,
-                        discord_enabled: checked,
-                      })
-                    }
-                  />
-                </div>
-
-                {collectorSettings.discord_enabled && (
-                  <div className="grid gap-4 grid-cols-1 pl-3 sm:pl-4 border-l-2 border-muted w-full max-w-full">
-                    <div className="space-y-2 min-w-0 overflow-hidden">
-                      <Label htmlFor="discord_webhook_url">Webhook URL</Label>
-                      {collectorSettings.discord_webhook_url_configured && !showDiscordWebhook ? (
-                        <div className="flex gap-2">
-                          <div className="flex-1 flex items-center px-3 py-2 rounded-md border bg-muted/50">
-                            <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">
-                              <CheckCircle2 className="w-3 h-3 mr-1" />
-                              Configured
-                            </Badge>
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => setShowDiscordWebhook(true)}
-                            title="Change webhook URL"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex gap-2">
-                          <Input
-                            id="discord_webhook_url"
-                            type="password"
-                            placeholder="https://discord.com/api/webhooks/..."
-                            value={collectorSettings.discord_webhook_url}
-                            onChange={(e) =>
-                              setCollectorSettings({
-                                ...collectorSettings,
-                                discord_webhook_url: e.target.value,
-                              })
-                            }
-                          />
-                          {collectorSettings.discord_webhook_url_configured && (
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              onClick={() => {
-                                setShowDiscordWebhook(false)
-                                setCollectorSettings({
-                                  ...collectorSettings,
-                                  discord_webhook_url: '',
-                                })
-                              }}
-                              title="Cancel"
-                            >
-                              <EyeOff className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        Create a webhook in your Discord server channel settings (Server Settings → Integrations → Webhooks)
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
               {/* Cost Analysis Settings */}
               <div className="pt-4 border-t space-y-4">
                 <div className="flex items-center gap-2">
@@ -944,6 +759,16 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Notifications Tab */}
+        <TabsContent value="notifications" className="space-y-6">
+          <NotificationsSettings
+            settings={collectorSettings}
+            setSettings={setCollectorSettings}
+            onSave={handleSaveCollectorSettings}
+            saving={savingSettings}
+          />
         </TabsContent>
       </Tabs>
 

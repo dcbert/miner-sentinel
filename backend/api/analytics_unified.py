@@ -4,11 +4,9 @@ Preserves the existing API response shapes for the frontend.
 """
 import logging
 import math
-from datetime import timedelta
 
 from django.db.models import Avg, Count, Max, Min, Q, Sum
 from django.db.models.functions import TruncDay, TruncHour
-from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -20,25 +18,10 @@ from .models import (
     DeviceMiningStats,
     PoolStats,
 )
+from .time_window import parse_int_param as _parse_int_param
+from .time_window import parse_time_window
 
 logger = logging.getLogger(__name__)
-
-# Cap query windows to protect large installs (matches fleet endpoints: 90 days)
-_MAX_HOURS = 24 * 90
-_MAX_DAYS = 90
-
-
-def _parse_int_param(value, default, min_value=1, max_value=None):
-    """Safely parse a positive integer query param with optional bounds."""
-    try:
-        n = int(value)
-    except (TypeError, ValueError):
-        return default
-    if n < min_value:
-        n = min_value
-    if max_value is not None and n > max_value:
-        n = max_value
-    return n
 
 
 def _format_difficulty(value):
@@ -75,22 +58,25 @@ def _make_label(make: str) -> str:
 @permission_classes([IsAuthenticated])
 def overview_analytics(request):
     """Fleet overview KPIs from unified tables."""
-    hours = _parse_int_param(request.query_params.get('hours', 24), 24, min_value=1, max_value=_MAX_HOURS)
-    days = _parse_int_param(request.query_params.get('days', 7), 7, min_value=1, max_value=_MAX_DAYS)
-    start_time_hours = timezone.now() - timedelta(hours=hours)
-    start_time_days = timezone.now() - timedelta(days=days)
+    # Single coherent window (hours + optional absolute from/to)
+    window = parse_time_window(request.query_params)
+    hours, days = window.hours, window.days
+    time_filter = window.as_filter()
 
     active_devices = Device.objects.filter(is_active=True)
     bitaxe_count = active_devices.filter(make=Device.MAKE_BITAXE).count()
     avalon_count = active_devices.filter(make=Device.MAKE_AVALON).count()
     total_device_count = active_devices.count()
 
-    mining_recent = DeviceMiningStats.objects.filter(recorded_at__gte=start_time_hours)
-    mining_period = DeviceMiningStats.objects.filter(recorded_at__gte=start_time_days)
-    hardware_recent = DeviceHardwareStats.objects.filter(recorded_at__gte=start_time_hours)
-    hardware_period = DeviceHardwareStats.objects.filter(recorded_at__gte=start_time_days)
-    pool_stats_recent = PoolStats.objects.filter(recorded_at__gte=start_time_hours).first()
-    pool_stats_period = PoolStats.objects.filter(recorded_at__gte=start_time_days)
+    # Charts and period KPIs share the same bounds so 1h/6h/custom match the picker
+    mining_recent = DeviceMiningStats.objects.filter(**time_filter)
+    mining_period = mining_recent
+    hardware_recent = DeviceHardwareStats.objects.filter(**time_filter)
+    hardware_period = hardware_recent
+    pool_stats_recent = (
+        PoolStats.objects.filter(**time_filter).order_by('-recorded_at').first()
+    )
+    pool_stats_period = PoolStats.objects.filter(**time_filter)
 
     result = {
         'overview': {
@@ -99,7 +85,9 @@ def overview_analytics(request):
             'avalon_devices': avalon_count,
             'data_collection_period_hours': hours,
             'analysis_period_days': days,
-            'last_updated': timezone.now().isoformat(),
+            'window_start': window.start.isoformat(),
+            'window_end': window.end.isoformat(),
+            'last_updated': window.end.isoformat(),
         },
         'mining': {'current': {}, 'period': {}, 'efficiency': {}},
         'hardware': {'current': {}, 'period': {}, 'health': {}},
@@ -164,7 +152,7 @@ def overview_analytics(request):
 
     period_best = (
         DeviceMiningStats.objects.filter(
-            recorded_at__gte=start_time_days,
+            **time_filter,
             best_difficulty__isnull=False,
         )
         .order_by('-best_difficulty')
@@ -446,10 +434,9 @@ def overview_analytics(request):
 @permission_classes([IsAuthenticated])
 def detailed_analytics(request):
     """Analytics dashboard data from unified tables."""
-    hours = _parse_int_param(request.query_params.get('hours', 24), 24, min_value=1, max_value=_MAX_HOURS)
-    days = _parse_int_param(request.query_params.get('days', 7), 7, min_value=1, max_value=_MAX_DAYS)
-    start_time_hours = timezone.now() - timedelta(hours=hours)
-    start_time_days = timezone.now() - timedelta(days=days)
+    window = parse_time_window(request.query_params)
+    hours, days = window.hours, window.days
+    time_filter = window.as_filter()
 
     active_devices = Device.objects.filter(is_active=True)
 
@@ -482,7 +469,7 @@ def detailed_analytics(request):
             })
 
     per_dev_hw_hour = (
-        DeviceHardwareStats.objects.filter(recorded_at__gte=start_time_hours)
+        DeviceHardwareStats.objects.filter(**time_filter)
         .annotate(hour=TruncHour('recorded_at'))
         .values('hour', 'device_id')
         .annotate(avg_power=Avg('power_watts'), avg_temp=Avg('temperature_c'))
@@ -542,9 +529,8 @@ def detailed_analytics(request):
         expected_hours = expected_days = 0
         prob_beat_1h = prob_beat_24h = prob_beat_7d = 0
 
-    history_start = timezone.now() - timedelta(days=days)
     recent_bests = (
-        DeviceMiningStats.objects.filter(recorded_at__gte=history_start)
+        DeviceMiningStats.objects.filter(**time_filter)
         .filter(
             Q(best_difficulty__isnull=False, best_difficulty__gt=0)
             | Q(best_session_difficulty__isnull=False, best_session_difficulty__gt=0)
@@ -750,7 +736,7 @@ def detailed_analytics(request):
     }
 
     daily_efficiency = (
-        DeviceHardwareStats.objects.filter(recorded_at__gte=start_time_days)
+        DeviceHardwareStats.objects.filter(**time_filter)
         .annotate(day=TruncDay('recorded_at'))
         .values('day')
         .annotate(

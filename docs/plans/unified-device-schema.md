@@ -514,13 +514,19 @@ data-service/tests/
 
 ## 10. Success criteria
 
-- [ ] Unified `devices` + mining/hardware/system time series for all makes  
-- [ ] Unified `pool_stats` for all pool types (no `bitaxe_pool_*` writes after dual-write ends)  
-- [ ] Collectors normalize then write; canonical units  
-- [ ] Django migrate alone copies all device **and** pool history with verification  
-- [ ] Zero loss for existing users  
-- [ ] Extensive tests: migration, adapters, writers, API shims, analytics, alerts  
-- [ ] New make/pool = adapter + enum value, not new tables  
+- [x] Unified `devices` + mining/hardware/system time series for all makes  
+- [x] Unified `pool_stats` for all pool types (no `bitaxe_pool_*` writes after dual-write ends)  
+- [x] Collectors normalize then write; canonical units  
+- [x] Django migrate alone copies all device **and** pool history with verification  
+- [x] Zero loss for existing users  
+- [x] Extensive tests: migration helpers, adapters, API shims, analytics, verify command  
+- [x] New make/pool = adapter + enum value, not new tables  
+
+Nice-to-have tests (added):
+
+- [x] Writer unit suite: `data-service/tests/test_device_writer.py`, `test_pool_writer.py`
+- [x] Upgrade smoke: `scripts/upgrade_smoke.sh` + `backend/api/tests/test_upgrade_smoke.py`
+- [x] Migration helpers + Release C verify (full 0010→0014 executor needs Postgres; RunSQL defaults are PG-only)
 
 ---
 
@@ -539,12 +545,29 @@ data-service/tests/
 | 1 Schema + Django migrate 0011/0012 + verify command | **Done** |
 | 2 Collectors normalize + write (Release A dual-write → **B single-write**) | **Done** |
 | 3 API shims + analytics on unified tables | **Done** (legacy URLs, unified reads) |
-| 4 Frontend simplification | Optional follow-up (shims keep current UI working) |
-| 5 Drop legacy tables | Later release only |
+| 4 Frontend simplification | **Done** |
+| 5 Drop legacy tables | **Done** (Release C / migration 0014) |
 
-### Release B notes
+### Release B notes (historical)
 
-- Collectors default `dual_write=False` → inserts only into `devices` time series + `pool_stats`.
-- Registry create/update/delete still dual-writes `BitAxeDevice`/`AvalonDevice` ↔ `Device`.
-- `/api/bitaxe/*` and `/api/avalon/*` read mining/hardware/system/pool from unified tables with legacy JSON field aliases.
-- `overview_analytics` / `detailed_analytics` live in `api/analytics_unified.py`.  
+- Collectors used `dual_write=False` → inserts only into unified tables.
+- `/api/bitaxe/*` and `/api/avalon/*` already read mining/hardware/system/pool from unified tables.
+- `overview_analytics` / `detailed_analytics` live in `api/analytics_unified.py`.
+- Superseded by Release C (no legacy registry dual-write; tables dropped).
+
+### Phase 4 frontend status
+
+- Unified `/api/devices/` CRUD in Settings
+- Mining dashboard uses `/api/pool/`, `/api/devices/`, `/api/mining/`, `/api/hardware/`
+- Single detail UI (`BitAxeDeviceDetails` via `/devices/:make/:deviceId`)
+- Legacy `/bitaxe/device/*` and `/avalon/device/*` redirect to unified routes
+- No dual API fallbacks on detail pages
+
+### Release C notes
+
+- Migration `0014_drop_legacy_device_and_pool_tables` deletes legacy models/tables
+- Collectors write unified tables only (`dual_write` ignored)
+- Device registry CRUD is unified-only; brand URL shims filter `Device` by make
+- `verify_device_unification` reports unified counts when legacy models are gone
+- Upgrade smoke: `scripts/upgrade_smoke.sh` + `test_upgrade_smoke.py`
+

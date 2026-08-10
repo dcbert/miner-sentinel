@@ -26,7 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
 import { deviceDetailPath, isDeviceOnline, makeLabel, unwrapList } from '@/lib/devices';
 import { useTimeRange } from '@/lib/TimeRangeContext';
-import { formatRangeWindow, toDaysParams, toHoursParams } from '@/lib/timeRange';
+import { formatRangeWindow, toTimeRangeParams } from '@/lib/timeRange';
 
 // ============================================
 // HELPER COMPONENTS
@@ -193,16 +193,15 @@ export default function MiningDashboard() {
   const fetchData = async () => {
     try {
       setLoading(true)
-      const hoursParams = toHoursParams(range)
-      const daysParams = toDaysParams(range)
+      const rangeParams = toTimeRangeParams(range)
 
       const [poolRes, latestRes, statsRes, devicesRes, miningRes, hardwareRes] = await Promise.all([
         // Prefer trend endpoint scoped to range; fall back to paginated list
-        api.get('/api/bitaxe/pool/hashrate_trend/', { params: hoursParams }).catch(() =>
-          api.get('/api/bitaxe/pool/', { params: { ...hoursParams, limit: 500 } }).catch(() => ({ data: [] })),
+        api.get('/api/pool/hashrate_trend/', { params: rangeParams }).catch(() =>
+          api.get('/api/pool/', { params: { ...rangeParams, limit: 20000 } }).catch(() => ({ data: [] })),
         ),
-        api.get('/api/bitaxe/pool/latest/').catch(() => ({ data: null })),
-        api.get('/api/bitaxe/pool/statistics/', { params: daysParams }).catch(() => ({ data: null })),
+        api.get('/api/pool/latest/').catch(() => ({ data: null })),
+        api.get('/api/pool/statistics/', { params: rangeParams }).catch(() => ({ data: null })),
         api.get('/api/devices/').catch(() => ({ data: { results: [] } })),
         api.get('/api/mining/latest/').catch(() => ({ data: [] })),
         api.get('/api/hardware/latest/').catch(() => ({ data: [] })),
@@ -224,8 +223,13 @@ export default function MiningDashboard() {
     }
   }
 
-  const bitaxeDevices = devices.filter((d) => d.make === 'bitaxe')
-  const avalonDevices = devices.filter((d) => d.make === 'avalon')
+  // Group devices by make for fleet summary (Bitaxe, Avalon, NMAxe, NerdNOS, …)
+  const devicesByMake = devices.reduce((acc, d) => {
+    const m = d.make || 'other'
+    if (!acc[m]) acc[m] = []
+    acc[m].push(d)
+    return acc
+  }, {})
 
   const getAllDevices = () =>
     devices.map((device) => ({ ...device, deviceType: device.make }))
@@ -421,6 +425,19 @@ export default function MiningDashboard() {
     0,
   )
 
+  // Live workers: prefer fresh pool sample; fall back to online devices
+  const poolSampleAgeMs = latestStats?.recorded_at
+    ? Date.now() - new Date(latestStats.recorded_at).getTime()
+    : Infinity
+  const poolSampleFresh = Number.isFinite(poolSampleAgeMs) && poolSampleAgeMs < 30 * 60 * 1000
+  const poolWorkers = Number(latestStats?.workers)
+  const hasPoolWorkers = poolSampleFresh && Number.isFinite(poolWorkers)
+  const liveWorkerCount = hasPoolWorkers ? poolWorkers : activeDevices
+  const liveWorkerLabel = hasPoolWorkers
+    ? `Worker${liveWorkerCount !== 1 ? 's' : ''}`
+    : `Online device${liveWorkerCount !== 1 ? 's' : ''}`
+  const liveWorkersOnline = liveWorkerCount > 0
+
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* ============================================ */}
@@ -443,12 +460,16 @@ export default function MiningDashboard() {
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
-          {latestStats && (
-            <Badge variant="outline" className="px-2 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm">
-              <StatusIndicator status="online" size="sm" />
-              <span className="ml-2">{latestStats.workers} Worker{latestStats.workers !== 1 ? 's' : ''}</span>
-            </Badge>
-          )}
+          <Badge variant="outline" className="px-2 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm" title={
+            hasPoolWorkers
+              ? 'Live workers reported by the mining pool'
+              : 'Online mining devices (pool sample missing or stale)'
+          }>
+            <StatusIndicator status={liveWorkersOnline ? 'online' : 'offline'} size="sm" />
+            <span className="ml-2">
+              {liveWorkerCount} {liveWorkerLabel}
+            </span>
+          </Badge>
           <Button variant="outline" size="sm" onClick={fetchData} disabled={loading} className="h-8 sm:h-9">
             <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 mr-1.5 sm:mr-2 ${loading ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">Refresh</span>
@@ -472,15 +493,19 @@ export default function MiningDashboard() {
         <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
           <MetricCard
             title="Pool Hashrate"
-            value={formatHashrate(latestStats?.hashrate_1m)}
-            subtitle="1 minute average"
+            value={
+              poolSampleFresh
+                ? formatHashrate(latestStats?.hashrate_1m)
+                : formatHashrateGH(totalHashrateGhs)
+            }
+            subtitle={poolSampleFresh ? 'Pool 1 minute average' : 'Fleet live (pool stale)'}
             icon={Hash}
             iconColor="text-blue-500"
           />
           <MetricCard
             title="24h Average"
             value={formatHashrate(latestStats?.hashrate_1d)}
-            subtitle="Daily hashrate"
+            subtitle={poolSampleFresh ? 'Pool daily hashrate' : 'Last pool sample'}
             icon={TrendingUp}
             iconColor="text-green-500"
           />
@@ -488,10 +513,9 @@ export default function MiningDashboard() {
             title="Active Devices"
             value={`${activeDevices}/${totalDevices}`}
             subtitle={
-              [
-                bitaxeDevices.length ? `${bitaxeDevices.length} Bitaxe` : null,
-                avalonDevices.length ? `${avalonDevices.length} Avalon` : null,
-              ].filter(Boolean).join(', ') || 'No devices'
+              Object.entries(devicesByMake)
+                .map(([make, list]) => `${list.length} ${makeLabel(make)}`)
+                .join(', ') || 'No devices'
             }
             icon={Monitor}
             iconColor="text-purple-500"
@@ -552,18 +576,14 @@ export default function MiningDashboard() {
       {/* DETAILED TABS - Advanced data */}
       {/* ============================================ */}
       <Tabs defaultValue="pool" className="space-y-4">
-        <TabsList className="w-full overflow-x-auto lg:w-auto lg:inline-grid lg:grid-cols-5">
+        <TabsList className="w-full overflow-x-auto lg:w-auto lg:inline-grid lg:grid-cols-4">
           <TabsTrigger value="pool" className="gap-1.5 sm:gap-2">
             <Activity className="h-3.5 w-3.5 sm:h-4 sm:w-4 hidden sm:block" />
             Pool
           </TabsTrigger>
-          <TabsTrigger value="bitaxe" className="gap-1.5 sm:gap-2">
+          <TabsTrigger value="devices" className="gap-1.5 sm:gap-2">
             <Cpu className="h-3.5 w-3.5 sm:h-4 sm:w-4 hidden sm:block" />
-            Bitaxe
-          </TabsTrigger>
-          <TabsTrigger value="avalon" className="gap-1.5 sm:gap-2">
-            <Server className="h-3.5 w-3.5 sm:h-4 sm:w-4 hidden sm:block" />
-            Avalon
+            Devices
           </TabsTrigger>
           <TabsTrigger value="hashrate" className="gap-1.5 sm:gap-2">
             <Hash className="h-3.5 w-3.5 sm:h-4 sm:w-4 hidden sm:block" />
@@ -583,7 +603,10 @@ export default function MiningDashboard() {
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="text-lg">Hashrate Trend</CardTitle>
-                  <CardDescription>1-minute vs 24-hour average comparison</CardDescription>
+                  <CardDescription>
+                    1-minute vs 24-hour average · {hashrateChartData.length} point
+                    {hashrateChartData.length !== 1 ? 's' : ''} in selected range
+                  </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1.5">
@@ -724,8 +747,8 @@ export default function MiningDashboard() {
           </div>
         </TabsContent>
 
-        {/* Bitaxe Devices Tab */}
-        <TabsContent value="bitaxe" className="space-y-4">
+        {/* All devices (multi-make) */}
+        <TabsContent value="devices" className="space-y-4">
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
@@ -734,22 +757,28 @@ export default function MiningDashboard() {
                     <Cpu className="h-5 w-5 text-blue-500" />
                   </div>
                   <div>
-                    <CardTitle className="text-lg">Bitaxe Devices</CardTitle>
-                    <CardDescription>{bitaxeDevices.length} device{bitaxeDevices.length !== 1 ? 's' : ''} registered</CardDescription>
+                    <CardTitle className="text-lg">Fleet Devices</CardTitle>
+                    <CardDescription>
+                      {devices.length} device{devices.length !== 1 ? 's' : ''} registered
+                      {Object.keys(devicesByMake).length
+                        ? ` · ${Object.entries(devicesByMake).map(([m, list]) => `${list.length} ${makeLabel(m)}`).join(', ')}`
+                        : ''}
+                    </CardDescription>
                   </div>
                 </div>
-                <Badge variant="outline">{bitaxeDevices.filter((d) => isDeviceOnline(d)).length} Online</Badge>
+                <Badge variant="outline">{devices.filter((d) => isDeviceOnline(d)).length} Online</Badge>
               </div>
             </CardHeader>
             <CardContent>
               {loading ? (
                 <Skeleton className="h-64 w-full" />
-              ) : bitaxeDevices.length > 0 ? (
+              ) : devices.length > 0 ? (
                 <div className="rounded-lg border overflow-hidden">
                   <Table>
                     <TableHeader>
                       <TableRow className="bg-muted/50">
                         <TableHead className="font-semibold">Device</TableHead>
+                        <TableHead className="font-semibold">Make</TableHead>
                         <TableHead className="font-semibold">Status</TableHead>
                         <TableHead className="font-semibold">Hashrate</TableHead>
                         <TableHead className="font-semibold">Temp</TableHead>
@@ -759,7 +788,7 @@ export default function MiningDashboard() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {bitaxeDevices.map((device) => {
+                      {devices.map((device) => {
                         const miningStats = deviceMiningStats.find(
                           (stat) => stat.device === device.id || stat.device_id_str === device.device_id,
                         )
@@ -769,12 +798,15 @@ export default function MiningDashboard() {
                         const temp = hardwareStats?.temperature_c
                         const tempColor = temp > 70 ? 'text-red-500' : temp > 60 ? 'text-yellow-500' : ''
                         return (
-                          <TableRow key={device.device_id} className="hover:bg-muted/30">
+                          <TableRow key={`${device.make}-${device.device_id}`} className="hover:bg-muted/30">
                             <TableCell>
                               <div className="flex items-center gap-2">
                                 <Cpu className="h-4 w-4 text-blue-500" />
                                 <span className="font-medium">{device.device_name}</span>
                               </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline">{makeLabel(device.make)}</Badge>
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-2">
@@ -784,7 +816,7 @@ export default function MiningDashboard() {
                                 </Badge>
                               </div>
                             </TableCell>
-                            <TableCell className="font-mono">{formatDeviceHashrate(miningStats?.hashrate_ghs, 'bitaxe')}</TableCell>
+                            <TableCell className="font-mono">{formatDeviceHashrate(miningStats?.hashrate_ghs, device.make)}</TableCell>
                             <TableCell className={tempColor}>{temp ? `${temp.toFixed(1)}°C` : 'N/A'}</TableCell>
                             <TableCell>{hardwareStats?.power_watts ? `${hardwareStats.power_watts.toFixed(0)}W` : 'N/A'}</TableCell>
                             <TableCell>{hardwareStats?.efficiency_j_per_th ? `${hardwareStats.efficiency_j_per_th.toFixed(1)} J/TH` : 'N/A'}</TableCell>
@@ -792,7 +824,7 @@ export default function MiningDashboard() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => navigate(deviceDetailPath('bitaxe', device.device_id))}
+                                onClick={() => navigate(deviceDetailPath(device.make, device.device_id))}
                               >
                                 <ChevronRight className="h-4 w-4" />
                               </Button>
@@ -806,107 +838,14 @@ export default function MiningDashboard() {
               ) : (
                 <div className="flex flex-col items-center justify-center py-12 text-center">
                   <Cpu className="h-12 w-12 text-muted-foreground/30 mb-4" />
-                  <p className="text-muted-foreground">No Bitaxe devices found</p>
-                  <p className="text-sm text-muted-foreground/70 mt-1">Devices will appear here once registered</p>
+                  <p className="text-muted-foreground">No devices found</p>
+                  <p className="text-sm text-muted-foreground/70 mt-1">Add Bitaxe, Avalon, NMAxe, or NerdNOS devices in Settings</p>
                 </div>
               )}
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* Avalon Devices Tab */}
-        <TabsContent value="avalon" className="space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-purple-500/10">
-                    <Server className="h-5 w-5 text-purple-500" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-lg">Avalon Devices</CardTitle>
-                    <CardDescription>{avalonDevices.length} device{avalonDevices.length !== 1 ? 's' : ''} registered</CardDescription>
-                  </div>
-                </div>
-                <Badge variant="outline">{avalonDevices.filter((d) => isDeviceOnline(d)).length} Online</Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <Skeleton className="h-64 w-full" />
-              ) : avalonDevices.length > 0 ? (
-                <div className="rounded-lg border overflow-hidden">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="bg-muted/50">
-                        <TableHead className="font-semibold">Device</TableHead>
-                        <TableHead className="font-semibold">Status</TableHead>
-                        <TableHead className="font-semibold">Hashrate</TableHead>
-                        <TableHead className="font-semibold">Temp</TableHead>
-                        <TableHead className="font-semibold">Power</TableHead>
-                        <TableHead className="font-semibold">Efficiency</TableHead>
-                        <TableHead className="font-semibold">Shares</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {avalonDevices.map((device) => {
-                        const miningStats = deviceMiningStats.find(
-                          (stat) => stat.device === device.id || stat.device_id_str === device.device_id,
-                        )
-                        const hardwareStats = deviceHardwareStats.find(
-                          (stat) => stat.device === device.id || stat.device_id_str === device.device_id,
-                        )
-                        const temp = hardwareStats?.temperature_c
-                        const tempColor = temp > 70 ? 'text-red-500' : temp > 60 ? 'text-yellow-500' : ''
-                        return (
-                          <TableRow key={device.device_id} className="hover:bg-muted/30">
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <Server className="h-4 w-4 text-purple-500" />
-                                <span className="font-medium">{device.device_name}</span>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                <StatusIndicator status={isDeviceOnline(device) ? 'online' : 'offline'} />
-                                <Badge variant={isDeviceOnline(device) ? "default" : "destructive"} className="text-xs">
-                                  {isDeviceOnline(device) ? "Online" : "Offline"}
-                                </Badge>
-                              </div>
-                            </TableCell>
-                            <TableCell className="font-mono">{formatDeviceHashrate(miningStats?.hashrate_ghs, 'avalon')}</TableCell>
-                            <TableCell className={tempColor}>{temp ? `${temp.toFixed(1)}°C` : 'N/A'}</TableCell>
-                            <TableCell>{hardwareStats?.power_watts ? `${hardwareStats.power_watts.toFixed(0)}W` : 'N/A'}</TableCell>
-                            <TableCell>{hardwareStats?.efficiency_j_per_th ? `${hardwareStats.efficiency_j_per_th.toFixed(1)} J/TH` : 'N/A'}</TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-1">
-                                <Badge variant="outline" className="text-xs text-green-600 border-green-200 bg-green-50 dark:bg-green-950 dark:border-green-800">
-                                  {formatShares(miningStats?.shares_accepted)}
-                                </Badge>
-                                <span className="text-muted-foreground">/</span>
-                                <Badge variant="outline" className="text-xs text-red-600 border-red-200 bg-red-50 dark:bg-red-950 dark:border-red-800">
-                                  {formatShares(miningStats?.shares_rejected)}
-                                </Badge>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        )
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <Server className="h-12 w-12 text-muted-foreground/30 mb-4" />
-                  <p className="text-muted-foreground">No Avalon devices found</p>
-                  <p className="text-sm text-muted-foreground/70 mt-1">Devices will appear here once registered</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Hashrate Tab */}
         <TabsContent value="hashrate" className="space-y-6">
           {/* Hashrate Breakdown Cards */}
           <Card>

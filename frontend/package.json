@@ -49,5 +49,9 @@
     "test:ui": "vitest --ui"
   },
   "type": "module",
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "esbuild@0.21.5": true
+  }
 }

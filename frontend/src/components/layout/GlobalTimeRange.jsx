@@ -285,6 +285,9 @@ export default function GlobalTimeRange({ className, compact = false }) {
               <span className="font-medium text-foreground/80">Active window:</span>{' '}
               {formatRangeWindow(range)}
             </p>
+            <p className="text-[10px] text-muted-foreground/80 mt-0.5">
+              Custom ranges up to 90 days · absolute from/to sent to the API
+            </p>
           </div>
         </div>
       )}

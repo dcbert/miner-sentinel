@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-Test Bitaxe collector with Nerdqaxe device response (missing overheat_mode)
+Test Bitaxe collector with Nerdqaxe device response (missing overheat_mode).
+
+Release B writes unified tables only (dual_write=False). Nerdqaxe-specific
+defaults (overheat_mode, rotation, displayTimeout) live in normalize_system_info
+details, not legacy bitaxe_system_info inserts.
 """
 
-import sys
 import os
+import sys
 import unittest
-from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime
+from unittest.mock import MagicMock, Mock, patch
 
 # Add parent directory to path to import collectors
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -15,20 +18,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 class TestBitaxeNerdqaxeSupport(unittest.TestCase):
     """Test that Bitaxe collector handles Nerdqaxe devices correctly."""
-    
+
     def setUp(self):
-        """Set up test fixtures."""
-        # Mock database URL
         self.database_url = 'postgresql://test:test@localhost:5432/test'
-        
-    @patch('psycopg2.connect')
-    @patch('requests.get')
-    def test_nerdqaxe_missing_overheat_mode(self, mock_get, mock_connect):
-        """Test that collector handles Nerdqaxe response without overheat_mode field."""
-        from collectors.bitaxe_collector import BitAxeCollector
-        
-        # Mock Nerdqaxe API response (missing overheat_mode, rotation, displayTimeout)
-        nerdqaxe_response = {
+
+    def _nerdqaxe_response(self):
+        """Nerdqaxe API payload missing overheat_mode, rotation, displayTimeout."""
+        return {
             'hashRate': 500.0,
             'sharesAccepted': 100,
             'sharesRejected': 1,
@@ -76,80 +72,77 @@ class TestBitaxeNerdqaxeSupport(unittest.TestCase):
             'fallbackStratumPort': None,
             'isUsingFallbackStratum': 0,
             'freeHeap': 100000,
-            'isPSRAMAvailable': 1
+            'isPSRAMAvailable': 1,
         }
-        
-        # Mock HTTP response
+
+    def test_nerdqaxe_normalize_defaults_missing_fields(self):
+        """Missing Nerdqaxe fields get sensible defaults in normalized snapshot."""
+        from collectors.bitaxe_collector import BitAxeCollector
+
+        collector = BitAxeCollector(self.database_url, dual_write=False)
+        snap = collector.normalize_system_info(self._nerdqaxe_response(), 'nerdqaxe-1')
+
+        self.assertTrue(snap.online)
+        self.assertAlmostEqual(snap.mining.hashrate_ghs, 500.0)
+        self.assertAlmostEqual(snap.mining.best_difficulty, 1.5e6)
+        self.assertAlmostEqual(snap.mining.best_session_difficulty, 5e5)
+        self.assertEqual(snap.system.model_reported, 'BM1368')
+
+        details = snap.system.details
+        self.assertEqual(details.get('overheat_mode'), 0)
+        self.assertEqual(details.get('display_rotation'), 0)
+        self.assertEqual(details.get('display_timeout'), -1)
+        self.assertEqual(details.get('board_version'), 'nerdqaxe_v1')
+
+    @patch('psycopg2.connect')
+    @patch('requests.get')
+    def test_nerdqaxe_collect_writes_unified_tables(self, mock_get, mock_connect):
+        """collect_device_data inserts into unified tables, not legacy bitaxe_*."""
+        from collectors.bitaxe_collector import BitAxeCollector
+
         mock_response = Mock()
-        mock_response.json.return_value = nerdqaxe_response
+        mock_response.json.return_value = self._nerdqaxe_response()
         mock_response.raise_for_status = Mock()
         mock_get.return_value = mock_response
-        
-        # Mock database connection and cursor
+
+        # Side effects for:
+        # - collect_device_data: SELECT id, name FROM devices
+        # - write_snapshot: resolve_device_db_id → (1,)
+        # - update_device_status: SELECT error_message, last_seen_at, name
+        # - check_best_difficulty: previous best row
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = (1, 'Test Nerdqaxe')  # device_db_id, device_name
-        mock_cursor.fetchall.return_value = []  # No previous hashrates
-        
+        mock_cursor.fetchone.side_effect = [
+            (1, 'Test Nerdqaxe'),  # devices registry lookup in collect_device_data
+            (1,),  # resolve_device_db_id in write_snapshot
+            (None, None, 'Test Nerdqaxe'),  # update_device_status previous state
+            None,  # check_best_difficulty previous row
+        ]
+        mock_cursor.fetchall.return_value = []
+
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
         mock_connect.return_value = mock_conn
-        
-        # Create collector and test
-        collector = BitAxeCollector(self.database_url)
-        
-        # This should NOT raise a psycopg2.errors.NotNullViolation error
-        try:
-            collector.collect_device_data('test-device', '192.168.1.100')
-            
-            # Verify the cursor was called with the expected parameters
-            self.assertTrue(mock_cursor.execute.called)
-            
-            # Get the last execute call for the system_info INSERT
-            calls = [call for call in mock_cursor.execute.call_args_list 
-                    if 'bitaxe_system_info' in str(call)]
-            
-            self.assertTrue(len(calls) > 0, "Expected INSERT into bitaxe_system_info")
-            
-            # Extract the parameters from the INSERT call
-            insert_call = calls[0]
-            params = insert_call[0][1]  # Second argument to execute() is the parameters tuple
-            
-            # Find the overheat_mode parameter (it's at index 20 based on the INSERT statement)
-            # Parameters: device_id(0), recorded_at(1), ASICModel(2), boardVersion(3), hostname(4), 
-            # macAddr(5), version(6), axeOSVersion(7), idfVersion(8), runningPartition(9),
-            # ssid(10), wifiStatus(11), wifiRSSI(12), coreVoltage(13), coreVoltageActual(14),
-            # expectedHashrate(15), poolDifficulty(16), smallCoreCount(17),
-            # vrTemp(18), temptarget(19), overheat_mode(20), ...
-            overheat_mode_value = params[20]
-            
-            # Verify overheat_mode has a default value of 0 instead of None
-            self.assertEqual(overheat_mode_value, 0, 
-                           f"Expected overheat_mode to be 0 (default), got {overheat_mode_value}")
-            
-            # Also verify rotation (at index 28) and displayTimeout (at index 30)
-            # auto_fan_speed(21), fan_speed_percent(22), min_fan_speed(23),
-            # max_power(24), nominal_voltage(25), overclock_enabled(26),
-            # display_type(27), display_rotation(28), invert_screen(29), display_timeout(30)
-            rotation_value = params[28]
-            display_timeout_value = params[30]
-            
-            self.assertEqual(rotation_value, 0, 
-                           f"Expected rotation to be 0 (default), got {rotation_value}")
-            self.assertEqual(display_timeout_value, -1, 
-                           f"Expected displayTimeout to be -1 (default), got {display_timeout_value}")
-            
-            print("✅ Test passed: Nerdqaxe device with missing fields handled correctly")
-            
-        except Exception as e:
-            self.fail(f"Collector raised an exception with Nerdqaxe response: {e}")
-    
+
+        collector = BitAxeCollector(self.database_url, dual_write=False)
+        collector.collect_device_data('test-device', '192.168.1.100')
+
+        self.assertTrue(mock_cursor.execute.called)
+
+        sql_blobs = [str(call) for call in mock_cursor.execute.call_args_list]
+        unified_mining = [s for s in sql_blobs if 'device_mining_stats' in s]
+        unified_system = [s for s in sql_blobs if 'device_system_info' in s]
+        legacy_system = [s for s in sql_blobs if 'bitaxe_system_info' in s]
+
+        self.assertTrue(len(unified_mining) > 0, "Expected INSERT into device_mining_stats")
+        self.assertTrue(len(unified_system) > 0, "Expected INSERT into device_system_info")
+        self.assertEqual(len(legacy_system), 0, "Release B must not write legacy bitaxe_system_info")
+
     @patch('psycopg2.connect')
     @patch('requests.get')
     def test_standard_bitaxe_with_all_fields(self, mock_get, mock_connect):
-        """Test that collector still works with standard Bitaxe response including all fields."""
+        """Collector still works with a full AxeOS payload."""
         from collectors.bitaxe_collector import BitAxeCollector
-        
-        # Mock standard Bitaxe API response (with all fields)
+
         standard_response = {
             'hashRate': 600.0,
             'sharesAccepted': 200,
@@ -182,7 +175,7 @@ class TestBitaxeNerdqaxeSupport(unittest.TestCase):
             'smallCoreCount': 115,
             'vrTemp': 68,
             'temptarget': 75,
-            'overheat_mode': 0,  # Present in standard Bitaxe
+            'overheat_mode': 0,
             'autofanspeed': 1,
             'fanspeed': 75,
             'minFanSpeed': 30,
@@ -190,44 +183,41 @@ class TestBitaxeNerdqaxeSupport(unittest.TestCase):
             'nominalVoltage': 5.0,
             'overclockEnabled': 0,
             'display': 'OLED',
-            'rotation': 0,  # Present in standard Bitaxe
+            'rotation': 0,
             'invertscreen': 0,
-            'displayTimeout': 60,  # Present in standard Bitaxe
+            'displayTimeout': 60,
             'stratumPort': 3333,
             'fallbackStratumURL': '',
             'fallbackStratumPort': None,
             'isUsingFallbackStratum': 0,
             'freeHeap': 100000,
-            'isPSRAMAvailable': 1
+            'isPSRAMAvailable': 1,
         }
-        
-        # Mock HTTP response
+
         mock_response = Mock()
         mock_response.json.return_value = standard_response
         mock_response.raise_for_status = Mock()
         mock_get.return_value = mock_response
-        
-        # Mock database connection and cursor
+
         mock_cursor = MagicMock()
-        mock_cursor.fetchone.return_value = (2, 'Test Bitaxe')
+        mock_cursor.fetchone.side_effect = [
+            (2, 'Test Bitaxe'),
+            (2,),
+            (None, None, 'Test Bitaxe'),
+            None,
+        ]
         mock_cursor.fetchall.return_value = []
-        
+
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = mock_cursor
         mock_connect.return_value = mock_conn
-        
-        # Create collector and test
-        collector = BitAxeCollector(self.database_url)
-        
-        try:
-            collector.collect_device_data('test-device', '192.168.1.101')
-            
-            # Verify it still works with all fields present
-            self.assertTrue(mock_cursor.execute.called)
-            print("✅ Test passed: Standard Bitaxe device with all fields handled correctly")
-            
-        except Exception as e:
-            self.fail(f"Collector raised an exception with standard Bitaxe response: {e}")
+
+        collector = BitAxeCollector(self.database_url, dual_write=False)
+        collector.collect_device_data('test-device', '192.168.1.101')
+
+        self.assertTrue(mock_cursor.execute.called)
+        sql_blobs = [str(call) for call in mock_cursor.execute.call_args_list]
+        self.assertTrue(any('device_mining_stats' in s for s in sql_blobs))
 
 
 if __name__ == '__main__':

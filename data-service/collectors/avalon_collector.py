@@ -22,6 +22,7 @@ from collectors.normalized import (
     was_device_online,
 )
 from notifications.discord_notifier import DiscordNotifier
+from notifications.rules import NotificationRules
 from notifications.telegram_notifier import TelegramNotifier
 from retrying import retry
 
@@ -38,6 +39,7 @@ class AvalonCollector:
         self.devices = []  # Will be populated from database
         self.telegram_notifier = TelegramNotifier()
         self.discord_notifier = DiscordNotifier()
+        self.notification_rules = NotificationRules()
         self.writer = DeviceDataWriter(database_url, dual_write=dual_write)
 
     def update_telegram_settings(self, enabled, bot_token, chat_id):
@@ -61,6 +63,23 @@ class AvalonCollector:
             # Force-disable even if DISCORD_WEBHOOK_URL is set in the environment.
             self.discord_notifier = DiscordNotifier(webhook_url='')
             logger.info("Discord notifier disabled")
+
+    def update_notification_rules(self, rules):
+        """Update per-event alert toggles and thresholds."""
+        self.notification_rules = NotificationRules(rules)
+        logger.info(f"Notification rules updated: {self.notification_rules.as_dict()}")
+
+    def _notify(self, event_key: str, method_name: str, *args, **kwargs):
+        """Send to Telegram + Discord if the event rule is enabled."""
+        if not self.notification_rules.enabled(event_key):
+            logger.debug(f"Notification skipped ({event_key} disabled)")
+            return
+        tg = getattr(self.telegram_notifier, method_name, None)
+        dc = getattr(self.discord_notifier, method_name, None)
+        if tg:
+            tg(*args, **kwargs)
+        if dc:
+            dc(*args, **kwargs)
 
     def update_devices(self, devices):
         """Update the list of devices to monitor from database."""
@@ -195,8 +214,12 @@ class AvalonCollector:
                 logger.info(f"Successfully sent restart command to device {device_id}")
 
                 # Send notification about the restart
-                self.telegram_notifier.send_device_restart_notification(device_id, device_name)
-                self.discord_notifier.send_device_restart_notification(device_id, device_name)
+                self._notify(
+                    'auto_restart',
+                    'send_device_restart_notification',
+                    device_id,
+                    device_name,
+                )
                 return True
             else:
                 logger.warning(f"Restart command may have failed for device {device_id}: {response}")
@@ -207,7 +230,16 @@ class AvalonCollector:
             return False
 
     def check_hashrate_stagnation(self, device_db_id, device_id, device_name, current_hashrate, device_ip):
-        """Check if hashrate has been unchanged for 3 collections (unified table)."""
+        """Check if hashrate has been unchanged for N collections (unified table)."""
+        stagnation_on = self.notification_rules.enabled('hashrate_stagnation')
+        restart_on = self.notification_rules.enabled('auto_restart')
+        if not stagnation_on and not restart_on:
+            return
+
+        threshold = int(self.notification_rules.get('hashrate_stagnation', 'threshold_collections', 3) or 3)
+        threshold = max(2, min(20, threshold))
+        tolerance = float(self.notification_rules.get('hashrate_stagnation', 'tolerance_ghs', 0.1) or 0.1)
+
         conn = self.get_db_connection()
         cursor = conn.cursor()
 
@@ -218,20 +250,28 @@ class AvalonCollector:
                 FROM device_mining_stats
                 WHERE device_id = %s
                 ORDER BY recorded_at DESC
-                LIMIT 3
+                LIMIT %s
             """,
-                (device_db_id,),
+                (device_db_id, threshold),
             )
 
             recent_hashrates = [row[0] for row in cursor.fetchall()]
 
-            if len(recent_hashrates) >= 3:
-                if all(abs(hr - recent_hashrates[0]) < 0.01 for hr in recent_hashrates):
+            if len(recent_hashrates) >= threshold:
+                if all(abs((hr or 0) - (recent_hashrates[0] or 0)) < tolerance for hr in recent_hashrates):
                     logger.warning(f"Hashrate stagnation detected for {device_id}")
-                    self.telegram_notifier.send_hashrate_alert(device_id, device_name, current_hashrate, 3)
-                    self.discord_notifier.send_hashrate_alert(device_id, device_name, current_hashrate, 3)
-                    logger.info(f"Attempting automatic restart for device {device_id} due to hashrate stagnation")
-                    self.restart_device(device_ip, device_id, device_name)
+                    if stagnation_on:
+                        self._notify(
+                            'hashrate_stagnation',
+                            'send_hashrate_alert',
+                            device_id,
+                            device_name,
+                            current_hashrate,
+                            threshold,
+                        )
+                    if restart_on:
+                        logger.info(f"Attempting automatic restart for device {device_id} due to hashrate stagnation")
+                        self.restart_device(device_ip, device_id, device_name)
 
         except Exception as e:
             logger.error(f"Error checking hashrate stagnation for {device_id}: {e}")
@@ -260,17 +300,7 @@ class AvalonCollector:
 
             result = cursor.fetchone()
             if not result:
-                cursor.execute(
-                    """
-                    SELECT error_message, last_seen_at, device_name
-                    FROM avalon_devices
-                    WHERE device_id = %s
-                """,
-                    (device_id,),
-                )
-                result = cursor.fetchone()
-                if not result:
-                    return
+                return
 
             prev_error, last_seen, device_name = result
             previously_online = was_device_online(prev_error, last_seen)
@@ -280,11 +310,13 @@ class AvalonCollector:
             if previously_online and not is_online:
                 last_seen_str = last_seen.strftime("%Y-%m-%d %H:%M:%S") if last_seen else "Unknown"
                 logger.warning(f"Device {device_id} went offline. Last seen: {last_seen_str}")
-                self.telegram_notifier.send_device_offline_alert(
-                    device_id, device_name or device_id, last_seen_str, error_message
-                )
-                self.discord_notifier.send_device_offline_alert(
-                    device_id, device_name or device_id, last_seen_str, error_message
+                self._notify(
+                    'device_offline',
+                    'send_device_offline_alert',
+                    device_id,
+                    device_name or device_id,
+                    last_seen_str,
+                    error_message,
                 )
 
             # Transition: offline → online (device had prior contact with an error)
@@ -296,11 +328,12 @@ class AvalonCollector:
                 duration_str = self._format_duration(offline_duration)
 
                 logger.info(f"Device {device_id} came back online after {duration_str}")
-                self.telegram_notifier.send_device_online_alert(
-                    device_id, device_name or device_id, duration_str
-                )
-                self.discord_notifier.send_device_online_alert(
-                    device_id, device_name or device_id, duration_str
+                self._notify(
+                    'device_online',
+                    'send_device_online_alert',
+                    device_id,
+                    device_name or device_id,
+                    duration_str,
                 )
 
         except Exception as e:
@@ -325,6 +358,13 @@ class AvalonCollector:
 
     def check_best_difficulty_improvement(self, device_db_id, device_id, device_name, current_best_diff):
         """Check if Avalon device achieved a new best difficulty (unified table)."""
+        if not self.notification_rules.enabled('best_difficulty'):
+            return
+
+        min_improvement = float(
+            self.notification_rules.get('best_difficulty', 'min_improvement_percent', 5.0) or 5.0
+        )
+
         conn = self.get_db_connection()
         cursor = conn.cursor()
 
@@ -345,14 +385,26 @@ class AvalonCollector:
 
             if current_best_diff > 0 and previous_best > 0:
                 improvement = ((current_best_diff - previous_best) / previous_best) * 100
-                if improvement >= 5:
+                if improvement >= min_improvement:
                     logger.info(f"New best difficulty for Avalon {device_id}: {current_best_diff}")
-                    self.telegram_notifier.send_best_difficulty_alert(device_id, device_name, current_best_diff, previous_best)
-                    self.discord_notifier.send_best_difficulty_alert(device_id, device_name, current_best_diff, previous_best)
+                    self._notify(
+                        'best_difficulty',
+                        'send_best_difficulty_alert',
+                        device_id,
+                        device_name,
+                        current_best_diff,
+                        previous_best,
+                    )
             elif current_best_diff > 0 and previous_best == 0:
                 logger.info(f"First best difficulty recorded for Avalon {device_id}: {current_best_diff}")
-                self.telegram_notifier.send_best_difficulty_alert(device_id, device_name, current_best_diff, 0)
-                self.discord_notifier.send_best_difficulty_alert(device_id, device_name, current_best_diff, 0)
+                self._notify(
+                    'best_difficulty',
+                    'send_best_difficulty_alert',
+                    device_id,
+                    device_name,
+                    current_best_diff,
+                    0,
+                )
 
         except Exception as e:
             logger.error(f"Error checking best difficulty for Avalon {device_id}: {e}")
@@ -567,12 +619,6 @@ class AvalonCollector:
                 (self.MAKE, device_id),
             )
             device_row = cursor.fetchone()
-            if not device_row:
-                cursor.execute(
-                    "SELECT id, device_name FROM avalon_devices WHERE device_id = %s",
-                    (device_id,),
-                )
-                device_row = cursor.fetchone()
             device_name = device_row[1] if device_row else device_id
             cursor.close()
             conn.close()

@@ -87,6 +87,9 @@ describe('unwrapList / paths / labels', () => {
     expect(deviceDetailPath('bitaxe', 'x')).toBe('/devices/bitaxe/x')
     expect(legacyDevicePath('avalon', 'a')).toBe('/avalon/device/a')
     expect(makeLabel('bitaxe')).toBe('Bitaxe')
+    expect(makeLabel('nmaxe')).toBe('NMAxe')
+    expect(makeLabel('nerdnos')).toBe('NerdNOS')
     expect(makeLabel('unknown-make')).toBe('Unknown-make')
+
   })
 })

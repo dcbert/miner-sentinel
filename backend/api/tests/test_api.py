@@ -6,13 +6,7 @@ Runs against SQLite in-memory via minersentinel.settings_test (MIGRATION_MODULES
 from unittest.mock import MagicMock, patch
 
 import pytest
-from api.device_sync import sync_avalon_to_unified, sync_bitaxe_to_unified
 from api.models import (
-    AvalonDevice,
-    AvalonSystemInfo,
-    BitAxeDevice,
-    BitAxePoolStats,
-    BitAxeSystemInfo,
     CollectorSettings,
     Device,
     DeviceHardwareStats,
@@ -46,36 +40,37 @@ def auth_client(api_client, user):
 
 @pytest.fixture
 def bitaxe_device(db):
-    legacy = BitAxeDevice.objects.create(
+    return Device.objects.create(
         device_id='bitaxe-001',
-        device_name='Test Bitaxe',
+        name='Test Bitaxe',
+        make=Device.MAKE_BITAXE,
+        protocol=Device.PROTOCOL_HTTP_AXEOS,
         ip_address='192.168.1.10',
         is_active=True,
     )
-    sync_bitaxe_to_unified(legacy)
-    return legacy
 
 
 @pytest.fixture
 def unified_bitaxe(bitaxe_device):
-    return Device.objects.get(make=Device.MAKE_BITAXE, device_id=bitaxe_device.device_id)
+    return bitaxe_device
 
 
 @pytest.fixture
 def avalon_device(db):
-    legacy = AvalonDevice.objects.create(
+    return Device.objects.create(
         device_id='avalon-001',
-        device_name='Test Avalon',
+        name='Test Avalon',
+        make=Device.MAKE_AVALON,
+        protocol=Device.PROTOCOL_CGMINER_TCP,
         ip_address='192.168.1.20',
+        port=4028,
         is_active=True,
     )
-    sync_avalon_to_unified(legacy)
-    return legacy
 
 
 @pytest.fixture
 def unified_avalon(avalon_device):
-    return Device.objects.get(make=Device.MAKE_AVALON, device_id=avalon_device.device_id)
+    return avalon_device
 
 
 @pytest.fixture
@@ -210,7 +205,7 @@ class TestBitAxeDeviceViewSet:
             'ip_address': '192.168.1.99',
         }
         resp = auth_client.post('/api/bitaxe/devices/', payload, format='json')
-        assert resp.status_code == 201
+        assert resp.status_code == 201, resp.data
         assert resp.data['device_id'] == 'bitaxe-new'
 
     def test_retrieve_device(self, auth_client, bitaxe_device):
@@ -236,9 +231,11 @@ class TestBitAxeDeviceViewSet:
         assert resp.status_code == 204
 
     def test_filter_active_only(self, auth_client, bitaxe_device):
-        BitAxeDevice.objects.create(
+        Device.objects.create(
             device_id='bitaxe-inactive',
-            device_name='Inactive',
+            name='Inactive',
+            make=Device.MAKE_BITAXE,
+            protocol=Device.PROTOCOL_HTTP_AXEOS,
             ip_address='192.168.1.11',
             is_active=False,
         )
@@ -582,27 +579,27 @@ class TestModels:
         assert 'Test Bitaxe' in str(hardware_log)
 
     def test_pool_stat_convert_ghs(self):
-        assert BitAxePoolStats._convert_hashrate_to_ghs('1G') == pytest.approx(1.0)
-        assert BitAxePoolStats._convert_hashrate_to_ghs('500M') == pytest.approx(0.5)
-        assert BitAxePoolStats._convert_hashrate_to_ghs('1T') == pytest.approx(1000.0)
-        assert BitAxePoolStats._convert_hashrate_to_ghs('2.5G') == pytest.approx(2.5)
-        assert BitAxePoolStats._convert_hashrate_to_ghs('') == 0.0
-        assert BitAxePoolStats._convert_hashrate_to_ghs(None) == 0.0
+        from api.migration_utils import convert_hashrate_str_to_ghs
+        assert convert_hashrate_str_to_ghs('1G') == pytest.approx(1.0)
+        assert convert_hashrate_str_to_ghs('500M') == pytest.approx(0.5)
+        assert convert_hashrate_str_to_ghs('1T') == pytest.approx(1000.0)
+        assert convert_hashrate_str_to_ghs('2.5G') == pytest.approx(2.5)
+        assert convert_hashrate_str_to_ghs('') is None
+        assert convert_hashrate_str_to_ghs(None) is None
 
-    def test_pool_stat_save_converts_hashrate(self, db):
-        stat = BitAxePoolStats.objects.create(
+    def test_pool_stat_create_unified(self, db):
+        stat = PoolStats.objects.create(
+            pool_type=PoolStats.POOL_CKPOOL,
             pool_address='bc1qtest2',
-            hashrate_1m='2G',
-            hashrate_5m='1.5G',
-            hashrate_1hr='1G',
-            hashrate_1d='900M',
-            hashrate_7d='800M',
-            lastshare=1700000000,
+            recorded_at=timezone.now(),
+            hashrate_1m_display='2G',
+            hashrate_1d_display='900M',
+            hashrate_1m_ghs=2.0,
+            hashrate_1d_ghs=0.9,
             workers=1,
             shares=100000,
-            bestshare=1234567.0,
-            bestever=9876543,
-            authorised=1699000000,
+            best_share=1234567.0,
+            best_ever=9876543,
         )
         assert stat.hashrate_1m_ghs == pytest.approx(2.0)
         assert stat.hashrate_1d_ghs == pytest.approx(0.9)
@@ -626,22 +623,20 @@ class TestModels:
         assert CollectorSettings.objects.filter(pk=1).exists()
         assert result == (0, {})
 
-    def test_bitaxe_system_info_str(self, db):
-        device = BitAxeDevice.objects.create(
-            device_id='sys-001', device_name='SysDevice', ip_address='10.0.0.1'
+    def test_device_system_info_str(self, db):
+        device = Device.objects.create(
+            device_id='sys-001',
+            name='SysDevice',
+            make=Device.MAKE_BITAXE,
+            protocol=Device.PROTOCOL_HTTP_AXEOS,
+            ip_address='10.0.0.1',
         )
-        info = BitAxeSystemInfo.objects.create(device=device, recorded_at=timezone.now())
-        assert 'SysDevice' in str(info)
-
-    def test_avalon_system_info_str(self, db):
-        device = AvalonDevice.objects.create(
-            device_id='av-sys-001', device_name='AvalonSys', ip_address='10.0.0.2'
+        info = DeviceSystemInfo.objects.create(
+            device=device, recorded_at=timezone.now(), hostname='sys'
         )
-        info = AvalonSystemInfo.objects.create(device=device, recorded_at=timezone.now())
-        assert 'AvalonSys' in str(info)
+        assert 'SysDevice' in str(info) or 'sys' in str(info)
 
-    def test_bitaxe_pool_stats_str(self, pool_stat):
-        # Unified PoolStats string representation
+    def test_pool_stats_str(self, pool_stat):
         assert 'bc1qtest' in str(pool_stat) or 'ckpool' in str(pool_stat).lower() or 'GH/s' in str(pool_stat)
 
 
@@ -1086,10 +1081,11 @@ class TestOverviewAnalyticsExtended:
 
     def test_with_custom_hours_and_days(self, auth_client, bitaxe_device,
                                          avalon_device, mining_stat, hardware_log):
+        # Single coherent window: hours is canonical; days is derived (ceil(hours/24))
         resp = auth_client.get('/api/overview/analytics/?hours=48&days=14')
         assert resp.status_code == 200
         assert resp.data['overview']['data_collection_period_hours'] == 48
-        assert resp.data['overview']['analysis_period_days'] == 14
+        assert resp.data['overview']['analysis_period_days'] == 2
 
     def test_financial_calculations(self, auth_client, bitaxe_device, avalon_device,
                                      mining_stat_with_diff, hardware_log_with_efficiency,

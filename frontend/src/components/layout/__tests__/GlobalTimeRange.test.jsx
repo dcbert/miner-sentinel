@@ -22,17 +22,17 @@ describe('GlobalTimeRange', () => {
     localStorage.clear()
   })
 
-  it('shows default Last 24 hours on the chip', () => {
+  it('shows default Last 30 days on the chip', () => {
     renderPicker()
     expect(screen.getByText('Range')).toBeInTheDocument()
-    expect(screen.getByText('Last 24 hours')).toBeInTheDocument()
+    expect(screen.getByText('Last 30 days')).toBeInTheDocument()
   })
 
   it('opens presets and selects 7 days', async () => {
     const user = userEvent.setup()
     renderPicker()
 
-    await user.click(screen.getByRole('button', { name: /last 24 hours/i }))
+    await user.click(screen.getByRole('button', { name: /last 30 days/i }))
     expect(screen.getByRole('dialog', { name: /select time range/i })).toBeInTheDocument()
 
     await user.click(screen.getByText('Last 7 days'))
@@ -49,7 +49,7 @@ describe('GlobalTimeRange', () => {
     const user = userEvent.setup()
     renderPicker()
 
-    await user.click(screen.getByRole('button', { name: /last 24 hours/i }))
+    await user.click(screen.getByRole('button', { name: /last 30 days/i }))
     await user.click(screen.getByRole('button', { name: /^custom$/i }))
 
     const from = screen.getByLabelText('From')

@@ -441,32 +441,54 @@ def reverse_unified_data(apps, schema_editor):
 
 def verify_unification_counts(apps_or_models=None) -> Dict[str, Any]:
     """
-    Compare legacy vs unified counts.
-    Can be called with Django apps registry (historical models) or live models.
+    Compare legacy vs unified counts when legacy tables still exist.
+
+    After Release C (migration 0014), legacy models are gone — this returns
+    ``legacy_available=False`` and only reports unified row counts.
     """
-    if apps_or_models is None:
-        from api import models as m
+    from api import models as m
 
-        legacy_devices = m.BitAxeDevice.objects.count() + m.AvalonDevice.objects.count()
-        legacy_mining = m.BitAxeMiningStats.objects.count() + m.AvalonMiningStats.objects.count()
-        legacy_hardware = m.BitAxeHardwareLog.objects.count() + m.AvalonHardwareLogs.objects.count()
-        legacy_system = m.BitAxeSystemInfo.objects.count() + m.AvalonSystemInfo.objects.count()
-        legacy_pool = m.BitAxePoolStats.objects.count()
+    unified = {
+        'devices': m.Device.objects.count(),
+        'mining': m.DeviceMiningStats.objects.count(),
+        'hardware': m.DeviceHardwareStats.objects.count(),
+        'system': m.DeviceSystemInfo.objects.count(),
+        'pool': m.PoolStats.objects.count(),
+    }
 
-        unified_devices = m.Device.objects.count()
-        unified_mining = m.DeviceMiningStats.objects.count()
-        unified_hardware = m.DeviceHardwareStats.objects.count()
-        unified_system = m.DeviceSystemInfo.objects.count()
-        unified_pool = m.PoolStats.objects.count()
-    else:
-        raise NotImplementedError("Pass None to use live models")
+    # Release C: legacy model classes removed
+    legacy_models = (
+        getattr(m, 'BitAxeDevice', None),
+        getattr(m, 'AvalonDevice', None),
+        getattr(m, 'BitAxeMiningStats', None),
+        getattr(m, 'AvalonMiningStats', None),
+        getattr(m, 'BitAxeHardwareLog', None),
+        getattr(m, 'AvalonHardwareLogs', None),
+        getattr(m, 'BitAxeSystemInfo', None),
+        getattr(m, 'AvalonSystemInfo', None),
+        getattr(m, 'BitAxePoolStats', None),
+    )
+    if any(cls is None for cls in legacy_models):
+        return {
+            'ok': True,
+            'legacy_available': False,
+            'checks': {k: (None, v) for k, v in unified.items()},
+            'unified': unified,
+            'message': 'Legacy tables dropped (Release C); unified-only counts reported.',
+        }
+
+    legacy_devices = m.BitAxeDevice.objects.count() + m.AvalonDevice.objects.count()
+    legacy_mining = m.BitAxeMiningStats.objects.count() + m.AvalonMiningStats.objects.count()
+    legacy_hardware = m.BitAxeHardwareLog.objects.count() + m.AvalonHardwareLogs.objects.count()
+    legacy_system = m.BitAxeSystemInfo.objects.count() + m.AvalonSystemInfo.objects.count()
+    legacy_pool = m.BitAxePoolStats.objects.count()
 
     checks = {
-        'devices': (legacy_devices, unified_devices),
-        'mining': (legacy_mining, unified_mining),
-        'hardware': (legacy_hardware, unified_hardware),
-        'system': (legacy_system, unified_system),
-        'pool': (legacy_pool, unified_pool),
+        'devices': (legacy_devices, unified['devices']),
+        'mining': (legacy_mining, unified['mining']),
+        'hardware': (legacy_hardware, unified['hardware']),
+        'system': (legacy_system, unified['system']),
+        'pool': (legacy_pool, unified['pool']),
     }
     ok = all(a == b for a, b in checks.values())
-    return {'ok': ok, 'checks': checks}
+    return {'ok': ok, 'legacy_available': True, 'checks': checks, 'unified': unified}

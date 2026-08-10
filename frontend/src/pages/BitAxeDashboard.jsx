@@ -33,12 +33,12 @@ export default function BitAxeDashboard() {
 
       // Fetch all data in parallel
       const [poolRes, latestRes, statsRes, devicesRes, miningRes, hardwareRes] = await Promise.all([
-        api.get('/api/bitaxe/pool/?limit=50'),
-        api.get('/api/bitaxe/pool/latest/'),
-        api.get('/api/bitaxe/pool/statistics/?days=7'),
-        api.get('/api/bitaxe/devices/'),
-        api.get('/api/bitaxe/mining/latest/'),
-        api.get('/api/bitaxe/hardware/latest/'),
+        api.get('/api/pool/?limit=50'),
+        api.get('/api/pool/latest/'),
+        api.get('/api/pool/statistics/?days=7'),
+        api.get('/api/devices/?make=bitaxe'),
+        api.get('/api/mining/latest/?make=bitaxe'),
+        api.get('/api/hardware/latest/?make=bitaxe'),
       ])
 
       setPoolStats(poolRes.data.results || poolRes.data || [])

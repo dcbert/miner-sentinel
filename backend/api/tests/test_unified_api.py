@@ -1,10 +1,10 @@
-"""Tests for unified /api/devices/, /api/mining/, /api/hardware/ endpoints."""
+"""Tests for unified /api/devices/, /api/mining/, /api/hardware/, /api/pool/ endpoints."""
 import pytest
 from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from api.models import Device, DeviceHardwareStats, DeviceMiningStats
+from api.models import Device, DeviceHardwareStats, DeviceMiningStats, PoolStats
 
 
 @pytest.fixture
@@ -16,7 +16,7 @@ def auth_client(db):
 
 
 @pytest.mark.django_db
-def test_create_device_unified_and_mirror(auth_client):
+def test_create_device_unified(auth_client):
     resp = auth_client.post(
         '/api/devices/',
         {
@@ -32,8 +32,8 @@ def test_create_device_unified_and_mirror(auth_client):
     assert resp.data['device_name'] == 'Fleet Bitaxe'
     assert resp.data['make'] == 'bitaxe'
     assert Device.objects.filter(make='bitaxe', device_id='fleet-1').exists()
-    from api.models import BitAxeDevice
-    assert BitAxeDevice.objects.filter(device_id='fleet-1').exists()
+    # Release C: no legacy BitAxeDevice table
+    assert not hasattr(__import__('api.models', fromlist=['Device']), 'BitAxeDevice')
 
 
 @pytest.mark.django_db
@@ -91,3 +91,59 @@ def test_device_details_by_make_id(auth_client):
     assert resp.status_code == 200
     assert resp.data['make'] == 'bitaxe'
     assert resp.data['latest_mining']['hashrate_ghs'] == pytest.approx(200)
+
+
+@pytest.mark.django_db
+def test_create_nmaxe_and_nerdnos_devices(auth_client):
+    nmaxe = auth_client.post(
+        '/api/devices/',
+        {
+            'device_id': 'nmaxeg2',
+            'device_name': 'NMAxe Gamma 2',
+            'make': 'nmaxe',
+            'ip_address': '10.0.0.50',
+            'is_active': True,
+        },
+        format='json',
+    )
+    assert nmaxe.status_code == 201
+    assert nmaxe.data['make'] == 'nmaxe'
+    assert nmaxe.data['protocol'] == Device.PROTOCOL_HTTP_NMAXE
+
+    nerd = auth_client.post(
+        '/api/devices/',
+        {
+            'device_id': 'nerd-1',
+            'device_name': 'NerdNOS Metal',
+            'make': 'nerdnos',
+            'ip_address': '10.0.0.51',
+            'is_active': True,
+        },
+        format='json',
+    )
+    assert nerd.status_code == 201
+    assert nerd.data['make'] == 'nerdnos'
+    assert nerd.data['protocol'] == Device.PROTOCOL_HTTP_NERDNOS
+
+    listed = auth_client.get('/api/devices/')
+    results = listed.data['results'] if isinstance(listed.data, dict) else listed.data
+    makes = {r['make'] for r in results}
+    assert 'nmaxe' in makes and 'nerdnos' in makes
+
+
+@pytest.mark.django_db
+def test_pool_api_latest_and_filter(auth_client):
+
+    PoolStats.objects.create(
+        pool_type=PoolStats.POOL_CKPOOL,
+        pool_address='bc1q',
+        recorded_at=timezone.now(),
+        hashrate_1m_ghs=10.0,
+        hashrate_1m_display='10G',
+        workers=1,
+    )
+    resp = auth_client.get('/api/pool/latest/')
+    assert resp.status_code == 200
+    assert resp.data['pool_address'] == 'bc1q'
+    resp2 = auth_client.get('/api/pool/?pool_type=ckpool')
+    assert resp2.status_code == 200

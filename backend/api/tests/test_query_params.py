@@ -3,11 +3,11 @@ import pytest
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 
-from api.analytics_unified import _parse_int_param as analytics_parse
+from api.time_window import parse_int_param as shared_parse
 from api.views import _parse_int_param as views_parse
 
 
-@pytest.mark.parametrize('parser', [views_parse, analytics_parse])
+@pytest.mark.parametrize('parser', [views_parse, shared_parse])
 class TestParseIntParam:
     def test_valid(self, parser):
         assert parser('24', 1) == 24
@@ -41,15 +41,21 @@ class TestAnalyticsInvalidParams:
         resp = auth_client.get('/api/overview/analytics/?hours=not-a-number&days=also-bad')
         assert resp.status_code == 200
         assert 'overview' in resp.data
-        # Defaults applied
+        # Defaults applied: 24h window; days derived as ceil(hours/24) = 1
         assert resp.data['overview']['data_collection_period_hours'] == 24
-        assert resp.data['overview']['analysis_period_days'] == 7
+        assert resp.data['overview']['analysis_period_days'] == 1
 
     def test_overview_clamps_huge_window(self, auth_client):
         resp = auth_client.get('/api/overview/analytics/?hours=999999&days=9999')
         assert resp.status_code == 200
         assert resp.data['overview']['data_collection_period_hours'] == 24 * 90
         assert resp.data['overview']['analysis_period_days'] == 90
+
+    def test_overview_one_hour_uses_one_hour_window(self, auth_client):
+        resp = auth_client.get('/api/overview/analytics/?hours=1&days=1')
+        assert resp.status_code == 200
+        assert resp.data['overview']['data_collection_period_hours'] == 1
+        assert resp.data['overview']['analysis_period_days'] == 1
 
     def test_detailed_invalid_hours_does_not_500(self, auth_client):
         resp = auth_client.get('/api/analytics/detailed/?hours=xyz&days=nope')

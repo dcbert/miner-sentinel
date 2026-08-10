@@ -36,12 +36,6 @@ class PublicPoolCollector:
             self.pool_url = f"{self.pool_url}/api"
         self.pool_address = pool_address
         self.dual_write = dual_write
-        self._dsn = None
-        if db_connection is not None:
-            try:
-                self._dsn = db_connection.dsn
-            except Exception:
-                self._dsn = None
         logger.info(f"Initialized PublicPool collector for address: {pool_address} at {self.pool_url}")
 
     @retry(stop_max_attempt_number=3, wait_exponential_multiplier=1000, wait_exponential_max=10000)
@@ -205,8 +199,8 @@ class PublicPoolCollector:
 
         try:
             snapshot = self.normalize_stats(client_data, pool_data)
-            database_url = self._resolve_database_url()
-            writer = PoolDataWriter(database_url, dual_write=self.dual_write)
+            # Reuse open collector connection (dsn omits password — never rebuild URL from it)
+            writer = PoolDataWriter(connection=self.db, dual_write=self.dual_write)
             writer.write_snapshot(snapshot)
             logger.info(
                 f"Stored PublicPool stats: {snapshot.hashrate_1m_display} "
@@ -215,24 +209,6 @@ class PublicPoolCollector:
         except Exception as e:
             logger.error(f"Failed to store pool stats: {e}")
             raise
-
-    def _resolve_database_url(self):
-        if self._dsn:
-            parts = dict(p.split('=', 1) for p in self._dsn.split() if '=' in p)
-            user = parts.get('user', 'minersentinel')
-            password = parts.get('password', '')
-            host = parts.get('host', 'localhost')
-            port = parts.get('port', '5432')
-            dbname = parts.get('dbname', 'minersentinel')
-            return f'postgresql://{user}:{password}@{host}:{port}/{dbname}'
-        from decouple import config
-        return (
-            f"postgresql://{config('POSTGRES_USER', default='minersentinel')}:"
-            f"{config('POSTGRES_PASSWORD', default='changeme')}@"
-            f"{config('POSTGRES_HOST', default='postgres')}:"
-            f"{config('POSTGRES_PORT', default='5432')}/"
-            f"{config('POSTGRES_DB', default='minersentinel')}"
-        )
 
     def collect(self):
         """

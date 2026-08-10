@@ -5,7 +5,7 @@ import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import { TimeRangeProvider } from '@/lib/TimeRangeContext';
 import AnalyticsDashboard from '@/pages/AnalyticsDashboard';
 import AvalonDeviceDetails from '@/pages/AvalonDeviceDetails';
-import BitAxeDeviceDetails from '@/pages/BitAxeDeviceDetails';
+import BitAxeDeviceDetailsRedirect from '@/pages/BitAxeDeviceDetailsRedirect';
 import DeviceDetails from '@/pages/DeviceDetails';
 import LoginPage from '@/pages/LoginPage';
 import MiningDashboard from '@/pages/MiningDashboard';
@@ -35,10 +35,10 @@ function AppRoutes() {
         <Routes>
           <Route path="/" element={<OverviewDashboard />} />
           <Route path="/mining" element={<MiningDashboard />} />
-          {/* Unified device detail */}
+          {/* Unified device detail (all makes) */}
           <Route path="/devices/:make/:deviceId" element={<DeviceDetails />} />
-          {/* Legacy detail routes (still supported) */}
-          <Route path="/bitaxe/device/:deviceId" element={<BitAxeDeviceDetails />} />
+          {/* Legacy detail routes → unified path */}
+          <Route path="/bitaxe/device/:deviceId" element={<BitAxeDeviceDetailsRedirect />} />
           <Route path="/avalon/device/:deviceId" element={<AvalonDeviceDetails />} />
           <Route path="/analytics" element={<AnalyticsDashboard />} />
           <Route path="/settings" element={<SettingsPage />} />

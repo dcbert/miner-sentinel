@@ -21,7 +21,7 @@ class CKPoolCollector:
         Initialize CKPool collector.
 
         Args:
-            db_connection: Database connection object (kept for API compat; writer uses DATABASE_URL)
+            db_connection: Open psycopg2 connection used for writes (preferred)
             pool_url: CKPool API base URL
             pool_address: Bitcoin address or pool username
             dual_write: also write legacy bitaxe_pool_stats
@@ -30,13 +30,6 @@ class CKPoolCollector:
         self.pool_url = pool_url.rstrip('/')
         self.pool_address = pool_address
         self.dual_write = dual_write
-        # Derive database URL from connection if possible; writer opened via dsn from conn
-        self._dsn = None
-        if db_connection is not None:
-            try:
-                self._dsn = db_connection.dsn
-            except Exception:
-                self._dsn = None
         logger.info(f"Initialized CKPool collector for address: {pool_address}")
 
     @retry(stop_max_attempt_number=3, wait_exponential_multiplier=1000, wait_exponential_max=10000)
@@ -125,7 +118,7 @@ class CKPoolCollector:
             hashrate_1h_display=str(h1h) if h1h is not None else None,
             hashrate_1d_display=str(h1d) if h1d is not None else None,
             hashrate_7d_display=str(h7d) if h7d is not None else None,
-            workers=int(stats_data.get('workers', 0) or 0),
+            workers=self._parse_workers(stats_data.get('workers')),
             shares=int(stats_data.get('shares', 0) or 0),
             best_share=float(stats_data.get('bestshare', 0) or 0),
             best_ever=float(stats_data.get('bestever', 0) or 0),
@@ -133,6 +126,22 @@ class CKPoolCollector:
             authorised_unix=int(stats_data.get('authorised', 0) or 0) or None,
             details={'source': 'ckpool'},
         )
+
+    @staticmethod
+    def _parse_workers(raw):
+        """CKPool may return workers as int, string, or list/dict of worker entries."""
+        if raw is None:
+            return 0
+        if isinstance(raw, bool):
+            return int(raw)
+        if isinstance(raw, (int, float)):
+            return int(raw)
+        if isinstance(raw, (list, tuple, set, dict)):
+            return len(raw)
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return 0
 
     def store_pool_stats(self, stats_data):
         """Store pool statistics via PoolDataWriter (unified + optional legacy)."""
@@ -142,32 +151,16 @@ class CKPoolCollector:
 
         try:
             snapshot = self.normalize_stats(stats_data)
-            database_url = self._resolve_database_url()
-            writer = PoolDataWriter(database_url, dual_write=self.dual_write)
+            # Reuse the open collector connection — never rebuild DSN (password is stripped)
+            writer = PoolDataWriter(connection=self.db, dual_write=self.dual_write)
             writer.write_snapshot(snapshot)
-            logger.info(f"Stored pool stats: {stats_data.get('hashrate1m', 'N/A')} @ {snapshot.recorded_at}")
+            logger.info(
+                f"Stored pool stats: {stats_data.get('hashrate1m', 'N/A')} "
+                f"({snapshot.workers} workers) @ {snapshot.recorded_at}"
+            )
         except Exception as e:
             logger.error(f"Failed to store pool stats: {e}")
             raise
-
-    def _resolve_database_url(self):
-        if self._dsn:
-            # psycopg2 dsn is space-separated key=value
-            parts = dict(p.split('=', 1) for p in self._dsn.split() if '=' in p)
-            user = parts.get('user', 'minersentinel')
-            password = parts.get('password', '')
-            host = parts.get('host', 'localhost')
-            port = parts.get('port', '5432')
-            dbname = parts.get('dbname', 'minersentinel')
-            return f'postgresql://{user}:{password}@{host}:{port}/{dbname}'
-        from decouple import config
-        return (
-            f"postgresql://{config('POSTGRES_USER', default='minersentinel')}:"
-            f"{config('POSTGRES_PASSWORD', default='changeme')}@"
-            f"{config('POSTGRES_HOST', default='postgres')}:"
-            f"{config('POSTGRES_PORT', default='5432')}/"
-            f"{config('POSTGRES_DB', default='minersentinel')}"
-        )
 
     def collect(self):
         """

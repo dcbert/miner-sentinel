@@ -12,7 +12,6 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .models import (
-    BitAxeDevice,
     CollectorSettings,
     Device,
     DeviceHardwareStats,
@@ -20,10 +19,8 @@ from .models import (
     DeviceSystemInfo,
     PoolStats,
 )
-from .models import AvalonDevice  # legacy mirror
 from .serializers import (
-    BitAxeDeviceSerializer,
-    BitAxeDeviceWriteSerializer,
+    BitaxeDeviceWriteSerializer,
     CollectorSettingsSerializer,
     DeviceSerializer,
     DeviceWriteSerializer,
@@ -39,64 +36,16 @@ from .unified_serializers import (
     UnifiedSystemAsBitaxeSerializer,
 )
 from .analytics_unified import detailed_analytics, overview_analytics
+from .time_window import MAX_DAYS as _MAX_DAYS
+from .time_window import MAX_HOURS as _MAX_HOURS
+from .time_window import parse_int_param as _parse_int_param
+from .time_window import parse_time_window
 
 logger = logging.getLogger(__name__)
 
-_MAX_HOURS = 24 * 90
-_MAX_DAYS = 90
-
-
-def _parse_int_param(value, default, min_value=1, max_value=None):
-    """Safely parse a positive integer query param with optional bounds."""
-    try:
-        n = int(value)
-    except (TypeError, ValueError):
-        return default
-    if n < min_value:
-        n = min_value
-    if max_value is not None and n > max_value:
-        n = max_value
-    return n
-
-
-def _mirror_unified_to_legacy(device: Device) -> None:
-    """Keep legacy registry rows in sync for dual-path collectors/admin."""
-    if device.make == Device.MAKE_BITAXE:
-        BitAxeDevice.objects.update_or_create(
-            device_id=device.device_id,
-            defaults={
-                'device_name': device.name,
-                'ip_address': device.ip_address,
-                'is_active': device.is_active,
-                'last_seen_at': device.last_seen_at,
-                'error_message': device.error_message,
-            },
-        )
-    elif device.make == Device.MAKE_AVALON:
-        AvalonDevice.objects.update_or_create(
-            device_id=device.device_id,
-            defaults={
-                'device_name': device.name,
-                'ip_address': device.ip_address,
-                'is_active': device.is_active,
-                'last_seen_at': device.last_seen_at,
-                'error_message': device.error_message,
-            },
-        )
-
-
-def _delete_legacy_mirror(make: str, device_id: str) -> None:
-    if make == Device.MAKE_BITAXE:
-        BitAxeDevice.objects.filter(device_id=device_id).delete()
-    elif make == Device.MAKE_AVALON:
-        AvalonDevice.objects.filter(device_id=device_id).delete()
-
 
 class DeviceViewSet(viewsets.ModelViewSet):
-    """
-    Unified device registry CRUD.
-    Mirrors Bitaxe/Avalon rows into legacy tables for compatibility.
-    """
+    """Unified device registry CRUD (sole device store after Release C)."""
     queryset = Device.objects.all().order_by('make', 'name')
     serializer_class = DeviceSerializer
 
@@ -115,19 +64,6 @@ class DeviceViewSet(viewsets.ModelViewSet):
             return DeviceWriteSerializer
         return DeviceSerializer
 
-    def perform_create(self, serializer):
-        device = serializer.save()
-        _mirror_unified_to_legacy(device)
-
-    def perform_update(self, serializer):
-        device = serializer.save()
-        _mirror_unified_to_legacy(device)
-
-    def perform_destroy(self, instance):
-        make, device_id = instance.make, instance.device_id
-        instance.delete()
-        _delete_legacy_mirror(make, device_id)
-
     @action(detail=True, methods=['get'], url_path='details')
     def details(self, request, pk=None):
         """Full device detail payload (mining, hardware, system, trends for selected window)."""
@@ -135,19 +71,15 @@ class DeviceViewSet(viewsets.ModelViewSet):
         latest_mining = DeviceMiningStats.objects.filter(device=device).first()
         latest_hardware = DeviceHardwareStats.objects.filter(device=device).first()
         latest_system = DeviceSystemInfo.objects.filter(device=device).first()
-        # Cap at 90 days to protect large installs; default 24h
-        try:
-            hours = max(1, min(int(request.query_params.get('hours', 24)), 24 * 90))
-        except (TypeError, ValueError):
-            hours = 24
-        start_time = timezone.now() - timedelta(hours=hours)
+        window = parse_time_window(request.query_params)
+        time_filter = window.as_filter()
         hashrate_trend = list(
-            DeviceMiningStats.objects.filter(device=device, recorded_at__gte=start_time)
+            DeviceMiningStats.objects.filter(device=device, **time_filter)
             .values('recorded_at', 'hashrate_ghs', 'shares_accepted', 'shares_rejected')
             .order_by('recorded_at')
         )
         temp_trend = list(
-            DeviceHardwareStats.objects.filter(device=device, recorded_at__gte=start_time)
+            DeviceHardwareStats.objects.filter(device=device, **time_filter)
             .values('recorded_at', 'temperature_c', 'power_watts', 'fan_speed_rpm')
             .order_by('recorded_at')
         )
@@ -170,7 +102,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
             # Keep legacy key names for frontend compatibility
             'hashrate_trend_24h': hashrate_trend,
             'temperature_trend_24h': temp_trend,
-            'trend_hours': hours,
+            'trend_hours': window.hours,
+            'window_start': window.start.isoformat(),
+            'window_end': window.end.isoformat(),
         })
 
 
@@ -186,13 +120,10 @@ class FleetMiningViewSet(viewsets.ReadOnlyModelViewSet):
         device_id = self.request.query_params.get('device_id')
         if device_id:
             qs = qs.filter(device__device_id=device_id)
-        hours = self.request.query_params.get('hours')
-        if hours is not None:
-            try:
-                h = max(1, min(int(hours), 24 * 90))
-                qs = qs.filter(recorded_at__gte=timezone.now() - timedelta(hours=h))
-            except (TypeError, ValueError):
-                pass
+        params = self.request.query_params
+        if any(params.get(k) not in (None, '') for k in ('hours', 'days', 'from', 'to')):
+            window = parse_time_window(params)
+            qs = qs.filter(**window.as_filter())
         return qs
 
     @action(detail=False, methods=['get'])
@@ -227,13 +158,10 @@ class FleetHardwareViewSet(viewsets.ReadOnlyModelViewSet):
         device_id = self.request.query_params.get('device_id')
         if device_id:
             qs = qs.filter(device__device_id=device_id)
-        hours = self.request.query_params.get('hours')
-        if hours is not None:
-            try:
-                h = max(1, min(int(hours), 24 * 90))
-                qs = qs.filter(recorded_at__gte=timezone.now() - timedelta(hours=h))
-            except (TypeError, ValueError):
-                pass
+        params = self.request.query_params
+        if any(params.get(k) not in (None, '') for k in ('hours', 'days', 'from', 'to')):
+            window = parse_time_window(params)
+            qs = qs.filter(**window.as_filter())
         return qs
 
     @action(detail=False, methods=['get'])
@@ -274,43 +202,21 @@ def device_details_by_make_id(request, make, device_id):
 
 class BitAxeDeviceViewSet(viewsets.ModelViewSet):
     """
-    API endpoint for Bitaxe devices with full CRUD operations.
-    Dual-writes to the unified Device registry.
+    Legacy URL shim: Bitaxe device CRUD against unified Device (make=bitaxe).
     """
-    queryset = BitAxeDevice.objects.all()
-    serializer_class = BitAxeDeviceSerializer
-    lookup_field = 'device_id'  # Use device_id instead of database pk
+    lookup_field = 'device_id'
 
     def get_queryset(self):
-        """Optionally filter to only active devices."""
-        queryset = super().get_queryset()
+        queryset = Device.objects.filter(make=Device.MAKE_BITAXE).order_by('name')
         active_only = self.request.query_params.get('active_only', 'false').lower() == 'true'
         if active_only:
             queryset = queryset.filter(is_active=True)
         return queryset
 
     def get_serializer_class(self):
-        """Use write serializer for create/update operations."""
         if self.action in ['create', 'update', 'partial_update']:
-            return BitAxeDeviceWriteSerializer
-        return BitAxeDeviceSerializer
-
-    def perform_create(self, serializer):
-        from .device_sync import sync_bitaxe_to_unified
-        instance = serializer.save()
-        sync_bitaxe_to_unified(instance)
-
-    def perform_update(self, serializer):
-        from .device_sync import sync_bitaxe_to_unified
-        instance = serializer.save()
-        sync_bitaxe_to_unified(instance)
-
-    def perform_destroy(self, instance):
-        from .device_sync import delete_unified_device
-        from .models import Device
-        device_id = instance.device_id
-        instance.delete()
-        delete_unified_device(Device.MAKE_BITAXE, device_id)
+            return BitaxeDeviceWriteSerializer
+        return UnifiedDeviceAsBitaxeSerializer
 
 
 class BitAxeMiningStatsViewSet(viewsets.ReadOnlyModelViewSet):
@@ -339,11 +245,10 @@ class BitAxeMiningStatsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def hashrate_trend(self, request):
         device_id = request.query_params.get('device_id')
-        hours = _parse_int_param(request.query_params.get('hours', 24), 24, min_value=1, max_value=_MAX_HOURS)
-        start_time = timezone.now() - timedelta(hours=hours)
+        window = parse_time_window(request.query_params)
         queryset = DeviceMiningStats.objects.filter(
             device__make=Device.MAKE_BITAXE,
-            recorded_at__gte=start_time,
+            **window.as_filter(),
         )
         if device_id:
             queryset = queryset.filter(device__device_id=device_id)
@@ -390,11 +295,10 @@ class BitAxeHardwareLogViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def temperature_trend(self, request):
         device_id = request.query_params.get('device_id')
-        hours = _parse_int_param(request.query_params.get('hours', 24), 24, min_value=1, max_value=_MAX_HOURS)
-        start_time = timezone.now() - timedelta(hours=hours)
+        window = parse_time_window(request.query_params)
         queryset = DeviceHardwareStats.objects.filter(
             device__make=Device.MAKE_BITAXE,
-            recorded_at__gte=start_time,
+            **window.as_filter(),
         )
         if device_id:
             queryset = queryset.filter(device__device_id=device_id)
@@ -434,35 +338,20 @@ class BitAxeSystemInfoViewSet(viewsets.ReadOnlyModelViewSet):
         try:
             device = Device.objects.get(make=Device.MAKE_BITAXE, device_id=device_id)
         except Device.DoesNotExist:
-            # Fallback: legacy registry still present during dual-registry era
-            try:
-                legacy = BitAxeDevice.objects.get(device_id=device_id)
-            except BitAxeDevice.DoesNotExist:
-                return Response({'detail': 'Device not found'}, status=status.HTTP_404_NOT_FOUND)
-            return Response({
-                'device': BitAxeDeviceSerializer(legacy).data,
-                'latest_mining': None,
-                'latest_hardware': None,
-                'latest_system': None,
-                'hashrate_trend_24h': [],
-                'temperature_trend_24h': [],
-            })
+            return Response({'detail': 'Device not found'}, status=status.HTTP_404_NOT_FOUND)
 
         latest_mining = DeviceMiningStats.objects.filter(device=device).first()
         latest_hardware = DeviceHardwareStats.objects.filter(device=device).first()
         latest_system = DeviceSystemInfo.objects.filter(device=device).first()
 
-        try:
-            hours = max(1, min(int(request.query_params.get('hours', 24)), 24 * 90))
-        except (TypeError, ValueError):
-            hours = 24
-        start_time = timezone.now() - timedelta(hours=hours)
+        window = parse_time_window(request.query_params)
+        time_filter = window.as_filter()
         hashrate_trend = DeviceMiningStats.objects.filter(
-            device=device, recorded_at__gte=start_time
+            device=device, **time_filter
         ).values('recorded_at', 'hashrate_ghs', 'shares_accepted', 'shares_rejected').order_by('recorded_at')
 
         temp_trend = DeviceHardwareStats.objects.filter(
-            device=device, recorded_at__gte=start_time
+            device=device, **time_filter
         ).values('recorded_at', 'temperature_c', 'power_watts', 'fan_speed_rpm').order_by('recorded_at')
 
         return Response({
@@ -472,12 +361,17 @@ class BitAxeSystemInfoViewSet(viewsets.ReadOnlyModelViewSet):
             'latest_system': UnifiedSystemAsBitaxeSerializer(latest_system).data if latest_system else None,
             'hashrate_trend_24h': list(hashrate_trend),
             'temperature_trend_24h': list(temp_trend),
-            'trend_hours': hours,
+            'trend_hours': window.hours,
+            'window_start': window.start.isoformat(),
+            'window_end': window.end.isoformat(),
         })
 
 
-class BitAxePoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
-    """Pool statistics — reads unified pool_stats with legacy field aliases."""
+class PoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    First-class pool statistics API (/api/pool/).
+    Reads unified pool_stats; supports pool_type + pool_address filters.
+    """
     serializer_class = UnifiedPoolAsLegacySerializer
 
     def get_queryset(self):
@@ -485,23 +379,24 @@ class BitAxePoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
         pool_address = self.request.query_params.get('pool_address')
         if pool_address:
             queryset = queryset.filter(pool_address=pool_address)
-        hours = self.request.query_params.get('hours')
-        if hours is not None:
-            try:
-                h = max(1, min(int(hours), 24 * 90))
-                queryset = queryset.filter(
-                    recorded_at__gte=timezone.now() - timedelta(hours=h)
-                )
-            except (TypeError, ValueError):
-                pass
+        pool_type = self.request.query_params.get('pool_type')
+        if pool_type:
+            queryset = queryset.filter(pool_type=pool_type)
+        params = self.request.query_params
+        if any(params.get(k) not in (None, '') for k in ('hours', 'days', 'from', 'to')):
+            window = parse_time_window(params)
+            queryset = queryset.filter(**window.as_filter())
         return queryset
 
     @action(detail=False, methods=['get'])
     def latest(self, request):
         pool_address = request.query_params.get('pool_address')
-        qs = PoolStats.objects.all()
+        pool_type = request.query_params.get('pool_type')
+        qs = PoolStats.objects.all().order_by('-recorded_at')
         if pool_address:
             qs = qs.filter(pool_address=pool_address)
+        if pool_type:
+            qs = qs.filter(pool_type=pool_type)
         latest_stat = qs.first()
         if latest_stat:
             return Response(self.get_serializer(latest_stat).data)
@@ -510,15 +405,18 @@ class BitAxePoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def hashrate_trend(self, request):
         pool_address = request.query_params.get('pool_address')
-        hours = _parse_int_param(request.query_params.get('hours', 24), 24, min_value=1, max_value=_MAX_HOURS)
-        start_time = timezone.now() - timedelta(hours=hours)
-        queryset = PoolStats.objects.filter(recorded_at__gte=start_time)
+        pool_type = request.query_params.get('pool_type')
+        window = parse_time_window(request.query_params)
+        queryset = PoolStats.objects.filter(**window.as_filter())
         if pool_address:
             queryset = queryset.filter(pool_address=pool_address)
+        if pool_type:
+            queryset = queryset.filter(pool_type=pool_type)
         stats = queryset.values(
             'recorded_at', 'hashrate_1m_display', 'hashrate_5m_display',
             'hashrate_1h_display', 'hashrate_1d_display',
             'hashrate_1m_ghs', 'hashrate_1d_ghs', 'shares', 'workers', 'best_share',
+            'pool_type', 'pool_address',
         ).order_by('recorded_at')
         out = [
             {
@@ -531,9 +429,10 @@ class BitAxePoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
                 'hashrate_1d_ghs': row['hashrate_1d_ghs'],
                 'shares': row['shares'],
                 'workers': row['workers'],
-                # Legacy frontend aliases
                 'bestshare': row['best_share'],
                 'best_share': row['best_share'],
+                'pool_type': row['pool_type'],
+                'pool_address': row['pool_address'],
             }
             for row in stats
         ]
@@ -542,11 +441,13 @@ class BitAxePoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def statistics(self, request):
         pool_address = request.query_params.get('pool_address')
-        days = _parse_int_param(request.query_params.get('days', 7), 7, min_value=1, max_value=_MAX_DAYS)
-        start_date = timezone.now() - timedelta(days=days)
-        queryset = PoolStats.objects.filter(recorded_at__gte=start_date)
+        pool_type = request.query_params.get('pool_type')
+        window = parse_time_window(request.query_params)
+        queryset = PoolStats.objects.filter(**window.as_filter())
         if pool_address:
             queryset = queryset.filter(pool_address=pool_address)
+        if pool_type:
+            queryset = queryset.filter(pool_type=pool_type)
 
         if not queryset.exists():
             return Response({
@@ -571,6 +472,11 @@ class BitAxePoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
         else:
             stats['total_shares'] = 0
         return Response(stats)
+
+
+class BitAxePoolStatsViewSet(PoolStatsViewSet):
+    """Legacy URL alias for /api/bitaxe/pool/ → same as /api/pool/."""
+    pass
 
 
 
@@ -832,6 +738,125 @@ def trigger_collector_poll(request):
             status=status.HTTP_503_SERVICE_UNAVAILABLE
         )
 
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def test_telegram_notification(request):
+    """Send a test Telegram message using stored credentials."""
+    import requests as http_requests
+
+    settings = CollectorSettings.get_settings()
+    token = (settings.telegram_bot_token or '').strip()
+    chat_id = (settings.telegram_chat_id or '').strip()
+    # Allow one-off token/chat from body without persisting
+    body = request.data or {}
+    if body.get('telegram_bot_token'):
+        token = str(body['telegram_bot_token']).strip()
+    if body.get('telegram_chat_id'):
+        chat_id = str(body['telegram_chat_id']).strip()
+
+    if not token or not chat_id:
+        return Response(
+            {'success': False, 'error': 'Telegram bot token and chat ID are required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not settings.telegram_enabled and not body.get('force'):
+        return Response(
+            {
+                'success': False,
+                'error': 'Telegram channel is disabled. Enable it or pass force=true to test.',
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        resp = http_requests.post(
+            f'https://api.telegram.org/bot{token}/sendMessage',
+            json={
+                'chat_id': chat_id,
+                'text': (
+                    '✅ <b>MinerSentinel test</b>\n\n'
+                    'Telegram notifications are working correctly.'
+                ),
+                'parse_mode': 'HTML',
+                'disable_web_page_preview': True,
+            },
+            timeout=15,
+        )
+        data = resp.json() if resp.content else {}
+        if resp.ok and data.get('ok'):
+            return Response({'success': True, 'message': 'Test message sent to Telegram'})
+        return Response(
+            {
+                'success': False,
+                'error': data.get('description') or f'Telegram API error ({resp.status_code})',
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as e:
+        logger.error(f"Telegram test failed: {e}", exc_info=True)
+        return Response(
+            {'success': False, 'error': str(e)},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def test_discord_notification(request):
+    """Send a test Discord webhook embed using stored credentials."""
+    import requests as http_requests
+
+    settings = CollectorSettings.get_settings()
+    webhook = (settings.discord_webhook_url or '').strip()
+    body = request.data or {}
+    if body.get('discord_webhook_url'):
+        webhook = str(body['discord_webhook_url']).strip()
+
+    if not webhook:
+        return Response(
+            {'success': False, 'error': 'Discord webhook URL is required'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not settings.discord_enabled and not body.get('force'):
+        return Response(
+            {
+                'success': False,
+                'error': 'Discord channel is disabled. Enable it or pass force=true to test.',
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        resp = http_requests.post(
+            webhook,
+            json={
+                'username': 'MinerSentinel',
+                'embeds': [
+                    {
+                        'title': '✅ MinerSentinel test',
+                        'description': 'Discord webhook notifications are working correctly.',
+                        'color': 3066993,
+                    }
+                ],
+            },
+            timeout=15,
+        )
+        if resp.status_code in (200, 204):
+            return Response({'success': True, 'message': 'Test message sent to Discord'})
+        return Response(
+            {
+                'success': False,
+                'error': f'Discord webhook error ({resp.status_code}): {resp.text[:200]}',
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    except Exception as e:
+        logger.error(f"Discord test failed: {e}", exc_info=True)
+        return Response(
+            {'success': False, 'error': str(e)},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
 
 
 def _format_difficulty(difficulty):

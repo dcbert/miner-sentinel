@@ -105,7 +105,8 @@ describe('OverviewDashboard (smoke + global time range)', () => {
 
     expect(await screen.findByText('Overview')).toBeInTheDocument()
     expect(screen.getByText(/Live metrics now/i)).toBeInTheDocument()
-    expect(screen.queryAllByText(/last 24 hours/i).length).toBeGreaterThan(0)
+    // Default global range is last 30 days
+    expect(screen.queryAllByText(/last 30 days/i).length).toBeGreaterThan(0)
 
     await waitFor(() => {
       expect(screen.queryAllByText(/Total Hashrate/i).length).toBeGreaterThan(0)
@@ -128,9 +129,9 @@ describe('OverviewDashboard (smoke + global time range)', () => {
       const calls = api.get.mock.calls.filter(([url]) => url.includes('/api/overview/analytics/'))
       expect(calls.length).toBeGreaterThanOrEqual(1)
       const lastCall = calls[calls.length - 1]
-      expect(lastCall[1]).toMatchObject({
-        params: { hours: 168, days: 7 },
-      })
+      expect(lastCall[1].params).toMatchObject({ hours: 168, days: 7 })
+      expect(lastCall[1].params.from).toBeTruthy()
+      expect(lastCall[1].params.to).toBeTruthy()
     })
 
     expect(screen.queryAllByText(/last 7 days/i).length).toBeGreaterThan(0)

@@ -7,6 +7,7 @@ import {
 } from 'react'
 import {
   DEFAULT_TIME_RANGE_KEY,
+  MAX_TIME_RANGE_DAYS,
   loadStoredTimeRange,
   resolveTimeRange,
   saveStoredTimeRange,
@@ -40,10 +41,10 @@ export function TimeRangeProvider({ children }) {
     if (toDate <= fromDate) {
       return { ok: false, error: 'End must be after start' }
     }
-    // Cap custom window at 365 days to protect API
-    const maxMs = 365 * 24 * 60 * 60 * 1000
+    // Cap custom window to match backend (90 days)
+    const maxMs = MAX_TIME_RANGE_DAYS * 24 * 60 * 60 * 1000
     if (toDate.getTime() - fromDate.getTime() > maxMs) {
-      return { ok: false, error: 'Range cannot exceed 365 days' }
+      return { ok: false, error: `Range cannot exceed ${MAX_TIME_RANGE_DAYS} days` }
     }
     const next = {
       mode: 'custom',
@@ -87,7 +88,7 @@ export function useTimeRange() {
 
 /**
  * Safe hook for components that may render outside the provider (tests).
- * Falls back to default 24h range.
+ * Falls back to default preset range.
  */
 export function useTimeRangeOptional() {
   const ctx = useContext(TimeRangeContext)

@@ -15,6 +15,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 from collectors.avalon_collector import AvalonCollector
 from collectors.bitaxe_collector import BitAxeCollector
 from collectors.ckpool_collector import collect_ckpool_data
+from collectors.nerdnos_collector import NerdNOSCollector
+from collectors.nmaxe_collector import NMAxeCollector
 from collectors.publicpool_collector import collect_publicpool_data
 from decouple import config
 from flask import Flask, jsonify
@@ -59,6 +61,8 @@ collector_settings = {
 # Initialize collectors (will load devices from database)
 bitaxe_collector = BitAxeCollector(DATABASE_URL)
 avalon_collector = AvalonCollector(DATABASE_URL)
+nmaxe_collector = NMAxeCollector(DATABASE_URL)
+nerdnos_collector = NerdNOSCollector(DATABASE_URL)
 
 # Scheduler
 scheduler = BackgroundScheduler()
@@ -76,7 +80,8 @@ def load_settings_from_database():
                    pool_type, ckpool_address, ckpool_url,
                    publicpool_address, publicpool_url,
                    telegram_enabled, telegram_bot_token, telegram_chat_id,
-                   discord_enabled, discord_webhook_url
+                   discord_enabled, discord_webhook_url,
+                   notification_rules
             FROM collector_settings
             WHERE id = 1
         """)
@@ -95,6 +100,8 @@ def load_settings_from_database():
 
             bitaxe_collector.update_telegram_settings(telegram_enabled, telegram_bot_token, telegram_chat_id)
             avalon_collector.update_telegram_settings(telegram_enabled, telegram_bot_token, telegram_chat_id)
+            nmaxe_collector.update_telegram_settings(telegram_enabled, telegram_bot_token, telegram_chat_id)
+            nerdnos_collector.update_telegram_settings(telegram_enabled, telegram_bot_token, telegram_chat_id)
 
             logger.info(f"Telegram notifications: {'enabled' if telegram_enabled else 'disabled'}")
 
@@ -104,8 +111,17 @@ def load_settings_from_database():
 
             bitaxe_collector.update_discord_settings(discord_enabled, discord_webhook_url)
             avalon_collector.update_discord_settings(discord_enabled, discord_webhook_url)
+            nmaxe_collector.update_discord_settings(discord_enabled, discord_webhook_url)
+            nerdnos_collector.update_discord_settings(discord_enabled, discord_webhook_url)
 
             logger.info(f"Discord notifications: {'enabled' if discord_enabled else 'disabled'}")
+
+            # Per-event alert rules (toggles + thresholds)
+            rules = collector_settings.get('notification_rules') or {}
+            bitaxe_collector.update_notification_rules(rules)
+            avalon_collector.update_notification_rules(rules)
+            nmaxe_collector.update_notification_rules(rules)
+            nerdnos_collector.update_notification_rules(rules)
         else:
             logger.warning("No settings found in database, using defaults")
 
@@ -118,70 +134,55 @@ def load_settings_from_database():
 
 
 def load_active_devices():
-    """Load active devices from unified devices table (fallback to legacy)."""
+    """Load active devices from unified devices table and dispatch by make."""
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        bitaxe_devices = []
-        avalon_devices = []
+        by_make = {
+            'bitaxe': [],
+            'avalon': [],
+            'nmaxe': [],
+            'nerdnos': [],
+        }
 
-        # Prefer unified registry
-        try:
-            cursor.execute("""
-                SELECT device_id, name AS device_name, ip_address, make, protocol, port
-                FROM devices
-                WHERE is_active = TRUE
-            """)
-            unified = cursor.fetchall()
-            for row in unified:
-                entry = {
-                    'device_id': row['device_id'],
-                    'device_name': row['device_name'],
-                    'ip_address': row['ip_address'],
-                    'port': row.get('port'),
-                }
-                if row['make'] == 'bitaxe':
-                    bitaxe_devices.append(entry)
-                elif row['make'] == 'avalon':
-                    avalon_devices.append(entry)
-            if unified:
-                logger.info(
-                    f"Loaded {len(bitaxe_devices)} Bitaxe + {len(avalon_devices)} Avalon "
-                    f"devices from unified devices table"
-                )
-        except Exception as e:
-            logger.warning(f"Unified devices table not available, using legacy: {e}")
-            unified = []
+        cursor.execute("""
+            SELECT device_id, name AS device_name, ip_address, make, protocol, port
+            FROM devices
+            WHERE is_active = TRUE
+        """)
+        for row in cursor.fetchall():
+            entry = {
+                'device_id': row['device_id'],
+                'device_name': row['device_name'],
+                'ip_address': row['ip_address'],
+                'port': row.get('port'),
+            }
+            make = row['make']
+            if make in by_make:
+                by_make[make].append(entry)
+            else:
+                logger.warning(f"No collector for make={make} device={row['device_id']} — skipped")
 
-        if not unified:
-            cursor.execute("""
-                SELECT device_id, device_name, ip_address
-                FROM bitaxe_devices
-                WHERE is_active = TRUE
-            """)
-            bitaxe_devices = cursor.fetchall()
-            cursor.execute("""
-                SELECT device_id, device_name, ip_address
-                FROM avalon_devices
-                WHERE is_active = TRUE
-            """)
-            avalon_devices = cursor.fetchall()
-            logger.info(
-                f"Loaded {len(bitaxe_devices)} Bitaxe + {len(avalon_devices)} Avalon "
-                f"devices from legacy tables"
-            )
+        logger.info(
+            "Loaded devices: "
+            f"bitaxe={len(by_make['bitaxe'])} avalon={len(by_make['avalon'])} "
+            f"nmaxe={len(by_make['nmaxe'])} nerdnos={len(by_make['nerdnos'])}"
+        )
 
-        bitaxe_collector.update_devices(bitaxe_devices)
-        avalon_collector.update_devices(avalon_devices)
+        bitaxe_collector.update_devices(by_make['bitaxe'])
+        avalon_collector.update_devices(by_make['avalon'])
+        nmaxe_collector.update_devices(by_make['nmaxe'])
+        nerdnos_collector.update_devices(by_make['nerdnos'])
 
         cursor.close()
         conn.close()
 
-        return bitaxe_devices, avalon_devices
+        return by_make
     except Exception as e:
         logger.error(f"Error loading devices from database: {e}", exc_info=True)
-        return [], []
+        return {'bitaxe': [], 'avalon': [], 'nmaxe': [], 'nerdnos': []}
+
 
 
 def poll_all_sources():
@@ -209,6 +210,20 @@ def poll_all_sources():
         logger.info("Avalon polling completed")
     except Exception as e:
         logger.error(f"Error polling Avalon devices: {e}", exc_info=True)
+
+    try:
+        logger.info("Polling NMAxe devices...")
+        nmaxe_collector.collect_all_devices()
+        logger.info("NMAxe polling completed")
+    except Exception as e:
+        logger.error(f"Error polling NMAxe devices: {e}", exc_info=True)
+
+    try:
+        logger.info("Polling NerdNOS devices...")
+        nerdnos_collector.collect_all_devices()
+        logger.info("NerdNOS polling completed")
+    except Exception as e:
+        logger.error(f"Error polling NerdNOS devices: {e}", exc_info=True)
 
     # Poll pool statistics based on pool_type setting
     pool_type = collector_settings.get('pool_type', 'ckpool')
@@ -342,36 +357,27 @@ def status():
 
         bitaxe_list = []
         avalon_list = []
-        try:
-            cursor.execute("""
-                SELECT name AS device_name, ip_address, make, port
-                FROM devices
-                WHERE is_active = TRUE
-            """)
-            for row in cursor.fetchall():
-                entry = {
-                    'name': row['device_name'],
-                    'ip': row['ip_address'],
-                    'port': row.get('port'),
-                }
-                if row['make'] == 'bitaxe':
-                    bitaxe_list.append(entry)
-                elif row['make'] == 'avalon':
-                    avalon_list.append(entry)
-        except Exception as unified_err:
-            logger.warning(f"Unified devices unavailable for status, using legacy: {unified_err}")
-            cursor.execute(
-                "SELECT device_name, ip_address FROM bitaxe_devices WHERE is_active = TRUE"
-            )
-            bitaxe_list = [
-                {'name': d['device_name'], 'ip': d['ip_address']} for d in cursor.fetchall()
-            ]
-            cursor.execute(
-                "SELECT device_name, ip_address FROM avalon_devices WHERE is_active = TRUE"
-            )
-            avalon_list = [
-                {'name': d['device_name'], 'ip': d['ip_address']} for d in cursor.fetchall()
-            ]
+        nmaxe_list = []
+        nerdnos_list = []
+        cursor.execute("""
+            SELECT name AS device_name, ip_address, make, port
+            FROM devices
+            WHERE is_active = TRUE
+        """)
+        for row in cursor.fetchall():
+            entry = {
+                'name': row['device_name'],
+                'ip': row['ip_address'],
+                'port': row.get('port'),
+            }
+            if row['make'] == 'bitaxe':
+                bitaxe_list.append(entry)
+            elif row['make'] == 'avalon':
+                avalon_list.append(entry)
+            elif row['make'] == 'nmaxe':
+                nmaxe_list.append(entry)
+            elif row['make'] == 'nerdnos':
+                nerdnos_list.append(entry)
 
         cursor.close()
         conn.close()
@@ -385,8 +391,12 @@ def status():
             'next_run': next_run.isoformat() if next_run else None,
             'bitaxe_devices_count': len(bitaxe_list),
             'avalon_devices_count': len(avalon_list),
+            'nmaxe_devices_count': len(nmaxe_list),
+            'nerdnos_devices_count': len(nerdnos_list),
             'bitaxe_devices': bitaxe_list,
             'avalon_devices': avalon_list,
+            'nmaxe_devices': nmaxe_list,
+            'nerdnos_devices': nerdnos_list,
         })
     except Exception as e:
         logger.error(f"Error getting status: {e}", exc_info=True)
@@ -442,8 +452,13 @@ if __name__ == '__main__':
 
     # Load active devices from database
     logger.info("Loading active devices from database...")
-    bitaxe_devices, avalon_devices = load_active_devices()
-    logger.info(f"Found {len(bitaxe_devices)} Bitaxe and {len(avalon_devices)} Avalon devices")
+    devices_by_make = load_active_devices()
+    logger.info(
+        f"Found devices: bitaxe={len(devices_by_make.get('bitaxe', []))} "
+        f"avalon={len(devices_by_make.get('avalon', []))} "
+        f"nmaxe={len(devices_by_make.get('nmaxe', []))} "
+        f"nerdnos={len(devices_by_make.get('nerdnos', []))}"
+    )
 
     # Run initial poll
     logger.info("Running initial data collection...")

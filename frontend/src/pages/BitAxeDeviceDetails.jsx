@@ -29,7 +29,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import api from '@/lib/api'
 import { isDeviceOnline } from '@/lib/devices'
 import { useTimeRange } from '@/lib/TimeRangeContext'
-import { formatRangeWindow, toHoursParams } from '@/lib/timeRange'
+import { formatRangeWindow, toTimeRangeParams } from '@/lib/timeRange'
 
 // ============================================
 // HELPER COMPONENTS
@@ -134,17 +134,12 @@ export default function BitAxeDeviceDetails() {
   const fetchDeviceDetails = async () => {
     try {
       setLoading(true)
-      const params = toHoursParams(range)
-      // Prefer unified details endpoint; fall back to legacy Bitaxe system path
-      try {
-        const response = await api.get(`/api/devices/${make}/${deviceId}/details/`, { params })
-        setDeviceData(response.data)
-      } catch {
-        const response = await api.get(`/api/bitaxe/system/device/${deviceId}/`, { params })
-        setDeviceData(response.data)
-      }
+      const params = toTimeRangeParams(range)
+      const response = await api.get(`/api/devices/${make}/${deviceId}/details/`, { params })
+      setDeviceData(response.data)
     } catch (error) {
       console.error('Error fetching device details:', error)
+      setDeviceData(null)
     } finally {
       setLoading(false)
     }
@@ -238,7 +233,7 @@ export default function BitAxeDeviceDetails() {
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-4">
-          <Button variant="outline" size="icon" onClick={() => navigate('/bitaxe')}>
+          <Button variant="outline" size="icon" onClick={() => navigate('/mining')}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>

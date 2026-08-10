@@ -2,336 +2,6 @@ from django.db import models
 from django.utils import timezone
 
 
-class BitAxeDevice(models.Model):
-    """Bitaxe device registry."""
-    device_id = models.CharField(max_length=50, unique=True, db_index=True)
-    device_name = models.CharField(max_length=100)
-    ip_address = models.GenericIPAddressField()
-    is_active = models.BooleanField(default=True)
-    last_seen_at = models.DateTimeField(blank=True, null=True, help_text="Last successful connection")
-    error_message = models.TextField(blank=True, null=True, help_text="Last error message if offline")
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = 'bitaxe_devices'
-
-    def __str__(self):
-        return f"{self.device_name} ({self.device_id})"
-
-
-class BitAxeMiningStats(models.Model):
-    """Bitaxe mining statistics."""
-    device = models.ForeignKey(BitAxeDevice, on_delete=models.CASCADE, related_name='mining_stats')
-    recorded_at = models.DateTimeField(db_index=True)
-    hashrate_ghs = models.FloatField(help_text="Hash rate in GH/s")
-    shares_accepted = models.IntegerField()
-    shares_rejected = models.IntegerField()
-    blocks_found = models.IntegerField(default=0)
-    uptime_seconds = models.IntegerField()
-    best_difficulty = models.BigIntegerField(blank=True, null=True, help_text="All-time best difficulty (from API 'bestDiff')")
-    best_session_difficulty = models.BigIntegerField(blank=True, null=True, help_text="Current session best difficulty (from API 'bestSessionDiff')")
-    pool_url = models.CharField(max_length=255, blank=True, null=True)
-    pool_user = models.CharField(max_length=255, blank=True, null=True)
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = 'bitaxe_mining_stats'
-        ordering = ['-recorded_at']
-        indexes = [
-            models.Index(fields=['device', '-recorded_at']),
-        ]
-
-    def __str__(self):
-        return f"{self.device.device_name}: {self.hashrate_ghs} GH/s at {self.recorded_at}"
-
-
-class BitAxeHardwareLog(models.Model):
-    """Bitaxe hardware metrics (power, temperature, etc.)."""
-    device = models.ForeignKey(BitAxeDevice, on_delete=models.CASCADE, related_name='hardware_logs')
-    recorded_at = models.DateTimeField(db_index=True)
-    power_watts = models.FloatField(help_text="Power consumption in Watts")
-    efficiency_j_per_th = models.FloatField(blank=True, null=True, help_text="Joules per TeraHash")
-    temperature_c = models.FloatField(help_text="Temperature in Celsius")
-    fan_speed_rpm = models.IntegerField(blank=True, null=True)
-    voltage = models.FloatField(blank=True, null=True)
-    frequency_mhz = models.IntegerField(blank=True, null=True)
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = 'bitaxe_hardware_logs'
-        ordering = ['-recorded_at']
-        indexes = [
-            models.Index(fields=['device', '-recorded_at']),
-        ]
-
-    def __str__(self):
-        return f"{self.device.device_name}: {self.temperature_c}°C, {self.power_watts}W at {self.recorded_at}"
-
-
-class BitAxeSystemInfo(models.Model):
-    """Extended Bitaxe system information."""
-    device = models.ForeignKey(BitAxeDevice, on_delete=models.CASCADE, related_name='system_info')
-    recorded_at = models.DateTimeField(db_index=True)
-
-    # Hardware info
-    asic_model = models.CharField(max_length=50, blank=True, null=True)
-    board_version = models.CharField(max_length=50, blank=True, null=True)
-    hostname = models.CharField(max_length=100, blank=True, null=True)
-    mac_address = models.CharField(max_length=17, blank=True, null=True)
-
-    # Software versions
-    version = models.CharField(max_length=50, blank=True, null=True)
-    axe_os_version = models.CharField(max_length=50, blank=True, null=True)
-    idf_version = models.CharField(max_length=50, blank=True, null=True)
-    running_partition = models.CharField(max_length=50, blank=True, null=True)
-
-    # Network
-    ssid = models.CharField(max_length=100, blank=True, null=True)
-    wifi_status = models.CharField(max_length=50, blank=True, null=True)
-    wifi_rssi = models.IntegerField(blank=True, null=True, help_text="WiFi signal strength")
-
-    # Performance
-    core_voltage = models.IntegerField(blank=True, null=True)
-    core_voltage_actual = models.IntegerField(blank=True, null=True)
-    expected_hashrate = models.FloatField(blank=True, null=True)
-    pool_difficulty = models.IntegerField(blank=True, null=True)
-    small_core_count = models.IntegerField(blank=True, null=True)
-
-    # Temperature management
-    vr_temp = models.IntegerField(blank=True, null=True, help_text="Voltage regulator temperature")
-    temp_target = models.IntegerField(blank=True, null=True)
-    overheat_mode = models.IntegerField(default=0)
-
-    # Fan control
-    auto_fan_speed = models.BooleanField(default=True)
-    fan_speed_percent = models.IntegerField(blank=True, null=True)
-    min_fan_speed = models.IntegerField(blank=True, null=True)
-
-    # Power settings
-    max_power = models.FloatField(blank=True, null=True)
-    nominal_voltage = models.FloatField(blank=True, null=True)
-    overclock_enabled = models.BooleanField(default=False)
-
-    # Display
-    display_type = models.CharField(max_length=50, blank=True, null=True)
-    display_rotation = models.IntegerField(default=0)
-    invert_screen = models.BooleanField(default=False)
-    display_timeout = models.IntegerField(default=-1)
-
-    # Stratum
-    stratum_url = models.CharField(max_length=255, blank=True, null=True)
-    stratum_port = models.IntegerField(blank=True, null=True)
-    stratum_user = models.CharField(max_length=255, blank=True, null=True)
-    fallback_stratum_url = models.CharField(max_length=255, blank=True, null=True)
-    fallback_stratum_port = models.IntegerField(blank=True, null=True)
-    is_using_fallback = models.BooleanField(default=False)
-
-    # Memory
-    free_heap = models.BigIntegerField(blank=True, null=True)
-    is_psram_available = models.BooleanField(default=False)
-
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = 'bitaxe_system_info'
-        ordering = ['-recorded_at']
-        indexes = [
-            models.Index(fields=['device', '-recorded_at']),
-        ]
-
-    def __str__(self):
-        return f"{self.device.device_name} System Info at {self.recorded_at}"
-
-
-
-class BitAxePoolStats(models.Model):
-    """Bitaxe mining pool statistics from CKPool."""
-    pool_address = models.CharField(max_length=255, db_index=True, help_text="Bitcoin address or pool username")
-    recorded_at = models.DateTimeField(default=timezone.now, db_index=True)
-
-    # Hashrate data (stored as strings from API, converted for display)
-    hashrate_1m = models.CharField(max_length=20, help_text="1 minute hashrate")
-    hashrate_5m = models.CharField(max_length=20, help_text="5 minute hashrate")
-    hashrate_1hr = models.CharField(max_length=20, help_text="1 hour hashrate")
-    hashrate_1d = models.CharField(max_length=20, help_text="1 day hashrate")
-    hashrate_7d = models.CharField(max_length=20, help_text="7 day hashrate")
-
-    # Pool statistics
-    lastshare = models.BigIntegerField(help_text="Unix timestamp of last share")
-    workers = models.IntegerField(help_text="Number of active workers")
-    shares = models.BigIntegerField(help_text="Total shares submitted")
-    bestshare = models.FloatField(help_text="Best share difficulty")
-    bestever = models.BigIntegerField(help_text="Best ever difficulty")
-    authorised = models.BigIntegerField(help_text="Unix timestamp of authorization")
-
-    # Calculated hashrate in GH/s for querying
-    hashrate_1m_ghs = models.FloatField(null=True, blank=True, help_text="1m hashrate converted to GH/s")
-    hashrate_1d_ghs = models.FloatField(null=True, blank=True, help_text="1d hashrate converted to GH/s")
-
-    class Meta:
-        db_table = 'bitaxe_pool_stats'
-        ordering = ['-recorded_at']
-        indexes = [
-            models.Index(fields=['pool_address', '-recorded_at']),
-            models.Index(fields=['-recorded_at']),
-        ]
-        verbose_name = "Bitaxe Pool Statistics"
-        verbose_name_plural = "Bitaxe Pool Statistics"
-
-    def __str__(self):
-        return f"Pool Stats: {self.hashrate_1m} at {self.recorded_at}"
-
-    def save(self, *args, **kwargs):
-        """Convert hashrate strings to GH/s for easier querying."""
-        self.hashrate_1m_ghs = self._convert_hashrate_to_ghs(self.hashrate_1m)
-        self.hashrate_1d_ghs = self._convert_hashrate_to_ghs(self.hashrate_1d)
-        super().save(*args, **kwargs)
-
-    @staticmethod
-    def _convert_hashrate_to_ghs(hashrate_str):
-        """Convert hashrate string (e.g., '466G', '1.29G', '185M') to GH/s float."""
-        if not hashrate_str:
-            return 0.0
-
-        # Remove whitespace
-        hashrate_str = hashrate_str.strip()
-
-        # Extract number and unit
-        import re
-        match = re.match(r'([\d.]+)([KMGTP]?)', hashrate_str, re.IGNORECASE)
-        if not match:
-            return 0.0
-
-        value = float(match.group(1))
-        unit = match.group(2).upper()
-
-        # Convert to GH/s
-        multipliers = {
-            '': 1e-9,      # H/s
-            'K': 1e-6,     # KH/s
-            'M': 0.001,    # MH/s
-            'G': 1,        # GH/s
-            'T': 1000,     # TH/s
-            'P': 1000000,  # PH/s
-        }
-
-        return value * multipliers.get(unit, 1)
-
-
-# Avalon Nano 3s Models
-class AvalonDevice(models.Model):
-    """Avalon Nano 3s device registry."""
-    device_id = models.CharField(max_length=50, unique=True, db_index=True)
-    device_name = models.CharField(max_length=100)
-    ip_address = models.GenericIPAddressField()
-    is_active = models.BooleanField(default=True)
-    last_seen_at = models.DateTimeField(blank=True, null=True)
-    error_message = models.TextField(blank=True, null=True)
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = 'avalon_devices'
-
-    def __str__(self):
-        return f"{self.device_name} ({self.device_id})"
-
-
-class AvalonMiningStats(models.Model):
-    """Avalon Nano 3s mining statistics."""
-    device = models.ForeignKey(AvalonDevice, on_delete=models.CASCADE, related_name='mining_stats')
-    recorded_at = models.DateTimeField(db_index=True)
-    hashrate_ghs = models.FloatField(help_text="Hashrate in GH/s")
-    shares_accepted = models.IntegerField(default=0)
-    shares_rejected = models.IntegerField(default=0)
-    blocks_found = models.IntegerField(default=0)
-    uptime_seconds = models.IntegerField(default=0)
-    difficulty = models.FloatField(default=0.0)
-    pool_url = models.CharField(max_length=255, blank=True, null=True)
-    pool_user = models.CharField(max_length=255, blank=True, null=True)
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = 'avalon_mining_stats'
-        ordering = ['-recorded_at']
-        indexes = [
-            models.Index(fields=['device', '-recorded_at']),
-        ]
-
-    def __str__(self):
-        return f"{self.device.device_name}: {self.hashrate_ghs} GH/s at {self.recorded_at}"
-
-
-class AvalonHardwareLogs(models.Model):
-    """Avalon Nano 3s hardware monitoring data."""
-    device = models.ForeignKey(AvalonDevice, on_delete=models.CASCADE, related_name='hardware_logs')
-    recorded_at = models.DateTimeField(db_index=True)
-    power_watts = models.FloatField(default=0.0)
-    efficiency_j_per_th = models.FloatField(default=0.0, help_text="Power efficiency in J/TH")
-    temperature_c = models.FloatField(default=0.0)
-    fan_speed_rpm = models.IntegerField(default=0)
-    voltage = models.FloatField(default=0.0)
-    frequency_mhz = models.FloatField(default=0.0)
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = 'avalon_hardware_logs'
-        ordering = ['-recorded_at']
-        indexes = [
-            models.Index(fields=['device', '-recorded_at']),
-        ]
-
-    def __str__(self):
-        return f"{self.device.device_name}: {self.temperature_c}°C, {self.power_watts}W at {self.recorded_at}"
-
-
-class AvalonSystemInfo(models.Model):
-    """Avalon Nano 3s extended system information."""
-    device = models.ForeignKey(AvalonDevice, on_delete=models.CASCADE, related_name='system_info')
-    recorded_at = models.DateTimeField(db_index=True)
-
-    # Device info
-    device_model = models.CharField(max_length=100, blank=True, null=True)
-    firmware_version = models.CharField(max_length=100, blank=True, null=True)
-    hardware_version = models.CharField(max_length=100, blank=True, null=True)
-    serial_number = models.CharField(max_length=100, blank=True, null=True)
-    mac_address = models.CharField(max_length=18, blank=True, null=True)
-
-    # Network info
-    ip_address = models.GenericIPAddressField(blank=True, null=True)
-    hostname = models.CharField(max_length=255, blank=True, null=True)
-    wifi_ssid = models.CharField(max_length=255, blank=True, null=True)
-    wifi_signal_strength = models.IntegerField(blank=True, null=True)
-
-    # Pool configuration
-    primary_pool_url = models.CharField(max_length=255, blank=True, null=True)
-    primary_pool_user = models.CharField(max_length=255, blank=True, null=True)
-    backup_pool_url = models.CharField(max_length=255, blank=True, null=True)
-    backup_pool_user = models.CharField(max_length=255, blank=True, null=True)
-    active_pool = models.CharField(max_length=255, blank=True, null=True)
-
-    # System status
-    system_uptime_seconds = models.IntegerField(default=0)
-    memory_usage_percent = models.FloatField(default=0.0)
-    storage_usage_percent = models.FloatField(default=0.0)
-
-    # Mining configuration
-    target_frequency = models.FloatField(default=0.0)
-    target_voltage = models.FloatField(default=0.0)
-    auto_tune_enabled = models.BooleanField(default=False)
-
-    created_at = models.DateTimeField(default=timezone.now)
-
-    class Meta:
-        db_table = 'avalon_system_info'
-        ordering = ['-recorded_at']
-        indexes = [
-            models.Index(fields=['device', '-recorded_at']),
-        ]
-
-    def __str__(self):
-        return f"{self.device.device_name} System Info at {self.recorded_at}"
-
-
 # ---------------------------------------------------------------------------
 # Unified multi-make device + pool models
 # ---------------------------------------------------------------------------
@@ -341,6 +11,8 @@ class Device(models.Model):
 
     MAKE_BITAXE = 'bitaxe'
     MAKE_AVALON = 'avalon'
+    MAKE_NMAXE = 'nmaxe'  # NMAxe / NMAxeGamma (NMTech fork, nested AxeOS-style API)
+    MAKE_NERDNOS = 'nerdnos'  # NerdNOS (Metal Edition) — separate HTTP /api/status
     MAKE_ANTMINER = 'antminer'
     MAKE_WHATSMINER = 'whatsminer'
     MAKE_BRAIINS = 'braiins'
@@ -350,6 +22,8 @@ class Device(models.Model):
     MAKE_CHOICES = [
         (MAKE_BITAXE, 'Bitaxe'),
         (MAKE_AVALON, 'Avalon'),
+        (MAKE_NMAXE, 'NMAxe'),
+        (MAKE_NERDNOS, 'NerdNOS'),
         (MAKE_ANTMINER, 'Antminer'),
         (MAKE_WHATSMINER, 'Whatsminer'),
         (MAKE_BRAIINS, 'Braiins'),
@@ -360,12 +34,16 @@ class Device(models.Model):
 
     PROTOCOL_HTTP_AXEOS = 'http_axeos'
     PROTOCOL_CGMINER_TCP = 'cgminer_tcp'
+    PROTOCOL_HTTP_NMAXE = 'http_nmaxe'
+    PROTOCOL_HTTP_NERDNOS = 'http_nerdnos'
     PROTOCOL_WHATSMINER_API = 'whatsminer_api'
     PROTOCOL_BRAIINS = 'braiins'
     PROTOCOL_CUSTOM = 'custom'
     PROTOCOL_CHOICES = [
         (PROTOCOL_HTTP_AXEOS, 'HTTP AxeOS'),
         (PROTOCOL_CGMINER_TCP, 'cgminer TCP'),
+        (PROTOCOL_HTTP_NMAXE, 'HTTP NMAxe'),
+        (PROTOCOL_HTTP_NERDNOS, 'HTTP NerdNOS'),
         (PROTOCOL_WHATSMINER_API, 'Whatsminer API'),
         (PROTOCOL_BRAIINS, 'Braiins'),
         (PROTOCOL_CUSTOM, 'Custom'),
@@ -547,6 +225,70 @@ class PoolStats(models.Model):
         return f"{self.pool_type}:{self.pool_address} {self.hashrate_1m_ghs} GH/s at {self.recorded_at}"
 
 
+# Default per-event notification rules (user can toggle/tune via Settings → Notifications)
+DEFAULT_NOTIFICATION_RULES = {
+    'device_offline': {
+        'enabled': True,
+        'label': 'Device offline',
+        'description': 'Alert when a device becomes unreachable',
+    },
+    'device_online': {
+        'enabled': True,
+        'label': 'Device back online',
+        'description': 'Alert when a previously offline device recovers',
+    },
+    'hashrate_stagnation': {
+        'enabled': True,
+        'label': 'Hashrate stagnation',
+        'description': 'Alert when hashrate stays flat across multiple polls',
+        'threshold_collections': 3,
+        'tolerance_ghs': 0.1,
+    },
+    'auto_restart': {
+        'enabled': True,
+        'label': 'Auto-restart on stagnation',
+        'description': 'Attempt remote restart when hashrate stagnation is detected',
+    },
+    'best_difficulty': {
+        'enabled': True,
+        'label': 'New best difficulty',
+        'description': 'Celebrate personal best share difficulty improvements',
+        'min_improvement_percent': 5.0,
+    },
+}
+
+
+def merge_notification_rules(raw):
+    """Deep-merge stored rules with defaults (unknown keys ignored)."""
+    merged = {}
+    stored = raw if isinstance(raw, dict) else {}
+    for key, defaults in DEFAULT_NOTIFICATION_RULES.items():
+        entry = dict(defaults)
+        user = stored.get(key)
+        if isinstance(user, dict):
+            if 'enabled' in user:
+                entry['enabled'] = bool(user['enabled'])
+            if key == 'hashrate_stagnation':
+                try:
+                    n = int(user.get('threshold_collections', entry['threshold_collections']))
+                    entry['threshold_collections'] = max(2, min(20, n))
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    t = float(user.get('tolerance_ghs', entry['tolerance_ghs']))
+                    entry['tolerance_ghs'] = max(0.0, min(100.0, t))
+                except (TypeError, ValueError):
+                    pass
+            if key == 'best_difficulty':
+                try:
+                    p = float(user.get('min_improvement_percent', entry['min_improvement_percent']))
+                    entry['min_improvement_percent'] = max(0.0, min(100.0, p))
+                except (TypeError, ValueError):
+                    pass
+        merged[key] = entry
+    return merged
+
+
 class CollectorSettings(models.Model):
     """
     Singleton model for data collector configuration.
@@ -615,6 +357,13 @@ class CollectorSettings(models.Model):
         blank=True,
         default='',
         help_text="Discord webhook URL for alerts (create in Discord channel settings)"
+    )
+
+    # Per-event notification rules (enable/disable + thresholds). See DEFAULT_NOTIFICATION_RULES.
+    notification_rules = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Alert type toggles and tuning (offline, online, stagnation, restart, best difficulty)",
     )
 
     # Cost Analysis Settings
@@ -691,3 +440,7 @@ class CollectorSettings(models.Model):
         """Get or create the singleton settings instance."""
         obj, created = cls.objects.get_or_create(pk=1)
         return obj
+
+    def get_notification_rules(self):
+        """Merged notification rules with defaults (safe for missing/partial JSON)."""
+        return merge_notification_rules(self.notification_rules)

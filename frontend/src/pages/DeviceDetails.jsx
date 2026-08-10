@@ -1,9 +1,8 @@
 /**
  * Unified device detail route: /devices/:make/:deviceId
- * Delegates to make-specific detail UIs (Bitaxe-style or Avalon-style).
+ * One UI for all makes (Bitaxe-style layout + unified API).
  */
 import { Navigate, useParams } from 'react-router-dom'
-import AvalonDeviceDetails from '@/pages/AvalonDeviceDetails'
 import BitAxeDeviceDetails from '@/pages/BitAxeDeviceDetails'
 
 export default function DeviceDetails() {
@@ -13,10 +12,5 @@ export default function DeviceDetails() {
     return <Navigate to="/mining" replace />
   }
 
-  if (make === 'avalon') {
-    return <AvalonDeviceDetails />
-  }
-
-  // Default: Bitaxe-style detail page (also works for future makes with shared shape)
   return <BitAxeDeviceDetails />
 }

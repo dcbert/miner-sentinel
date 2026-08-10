@@ -1,8 +1,11 @@
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { toast } from '@/components/ui/toaster'
 import api from '@/lib/api'
-import { Eye, EyeOff, Lock, Sparkles, User, Zap } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { Eye, EyeOff, Loader2, Lock, User } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 export default function LoginPage({ onLogin }) {
@@ -11,11 +14,9 @@ export default function LoginPage({ onLogin }) {
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
 
-  // Fetch CSRF token on component mount
   useEffect(() => {
     const fetchCsrfToken = async () => {
       try {
-        // Make a GET request to trigger CSRF cookie creation
         await api.get('/api/auth/csrf/')
       } catch (error) {
         console.error('Failed to fetch CSRF token:', error)
@@ -32,10 +33,9 @@ export default function LoginPage({ onLogin }) {
       const response = await api.post('/api/auth/login/', { username, password })
       if (response.data.success) {
         toast({
-          title: 'Success',
-          description: 'Logged in successfully',
+          title: 'Signed in',
+          description: 'Welcome back to MinerSentinel',
         })
-        // Pass login data to auth context
         onLogin({
           token: response.data.token || 'session-active',
           user: response.data.user,
@@ -43,8 +43,11 @@ export default function LoginPage({ onLogin }) {
       }
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error.response?.data?.error || error.response?.data?.detail || 'Login failed',
+        title: 'Sign-in failed',
+        description:
+          error.response?.data?.error ||
+          error.response?.data?.detail ||
+          'Invalid username or password',
         variant: 'destructive',
       })
     } finally {
@@ -53,120 +56,140 @@ export default function LoginPage({ onLogin }) {
   }
 
   return (
-    <div className="min-h-screen relative overflow-hidden bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900">
-      {/* Animated background elements */}
-      <div className="absolute inset-0">
-        {/* Primary gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 via-purple-600/20 to-cyan-600/20" />
-
-        {/* Floating orbs */}
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/30 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob" />
-        <div className="absolute top-1/3 right-1/4 w-96 h-96 bg-purple-500/30 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob animation-delay-2000" />
-        <div className="absolute bottom-1/4 left-1/3 w-96 h-96 bg-cyan-500/30 rounded-full mix-blend-multiply filter blur-xl opacity-70 animate-blob animation-delay-4000" />
-
-        {/* Grid pattern */}
-        <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48cGF0dGVybiBpZD0iZ3JpZCIgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBwYXR0ZXJuVW5pdHM9InVzZXJTcGFjZU9uVXNlIj48cGF0aCBkPSJNIDQwIDAgTCAwIDAgMCA0MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIwLjUiIG9wYWNpdHk9IjAuMSIvPjwvcGF0dGVybj48L2RlZnM+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0idXJsKCNncmlkKSIvPjwvc3ZnPg==')] opacity-20" />
+    <div className="relative min-h-screen bg-background text-foreground">
+      {/* Subtle ambient background — same calm density as the app shell */}
+      <div
+        className="pointer-events-none absolute inset-0 overflow-hidden"
+        aria-hidden
+      >
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_hsl(var(--muted)/0.45)_0%,_transparent_55%)]" />
+        <div
+          className="absolute inset-0 opacity-[0.035] dark:opacity-[0.06]"
+          style={{
+            backgroundImage: `url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M40 0H0V40' fill='none' stroke='%23fff' stroke-width='0.5'/%3E%3C/svg%3E")`,
+          }}
+        />
       </div>
 
-      {/* Content */}
-      <div className="relative z-10 flex min-h-screen items-center justify-center p-4">
-        <div className="w-full max-w-md">
-          {/* Logo/Brand Section */}
-          <div className="text-center mb-6 sm:mb-8">
-            <div className="inline-flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-2xl shadow-2xl mb-3 sm:mb-4">
-              <Zap className="w-7 h-7 sm:w-8 sm:h-8 text-white" />
+      <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-4 py-10">
+        <div className="w-full max-w-[400px] space-y-8">
+          {/* Brand */}
+          <div className="flex flex-col items-center text-center">
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-xl border border-border/80 bg-card shadow-sm">
+              <img
+                src="/logo.svg"
+                alt="MinerSentinel"
+                width={40}
+                height={40}
+                className="h-10 w-10 rounded-md object-cover"
+                draggable={false}
+              />
             </div>
-            <h1 className="text-3xl sm:text-4xl font-bold bg-gradient-to-r from-white via-blue-100 to-cyan-100 bg-clip-text text-transparent">
+            <h1 className="text-xl font-semibold tracking-tight text-foreground">
               MinerSentinel
             </h1>
-            <p className="text-blue-200/80 mt-2 text-sm sm:text-base">Personal Data Convergence Dashboard</p>
+            <p className="mt-1.5 max-w-xs text-sm text-muted-foreground">
+              Self-hosted monitoring for Bitaxe and Avalon miners
+            </p>
           </div>
 
-          {/* Login Card */}
-          <Card className="backdrop-blur-xl bg-white/10 border-white/20 shadow-2xl hover:shadow-3xl transition-all duration-500 hover:bg-white/15">
-            <CardHeader className="space-y-1 pb-4 sm:pb-6">
-              <CardTitle className="text-xl sm:text-2xl font-bold text-center text-white flex items-center justify-center gap-2">
-                <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
-                Welcome Back
-                <div className="w-2 h-2 bg-cyan-400 rounded-full animate-pulse animation-delay-1000"></div>
+          {/* Login card */}
+          <Card className="border-border/80 shadow-sm">
+            <CardHeader className="space-y-1 pb-4">
+              <CardTitle className="text-lg font-semibold tracking-tight">
+                Sign in
               </CardTitle>
-              <CardDescription className="text-center text-blue-200/80">
-                Sign in to access your dashboard
+              <CardDescription>
+                Enter your credentials to open the dashboard
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              <form onSubmit={handleSubmit} className="space-y-6">
-                {/* Username Field */}
-                <div className="space-y-2 group">
-                  <label className="text-sm font-medium text-white/90 flex items-center gap-2">
-                    <User className="w-4 h-4" />
-                    Username
-                  </label>
+            <CardContent>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="username">Username</Label>
                   <div className="relative">
-                    <input
+                    <User
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                      strokeWidth={1.75}
+                      aria-hidden
+                    />
+                    <Input
+                      id="username"
+                      name="username"
                       type="text"
+                      autoComplete="username"
+                      autoFocus
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent focus:bg-white/10 transition-all duration-300 backdrop-blur-sm"
-                      placeholder="Enter your username"
+                      className="pl-9"
+                      placeholder="Username"
                       required
+                      disabled={isLoading}
                     />
                   </div>
                 </div>
 
-                {/* Password Field */}
-                <div className="space-y-2 group">
-                  <label className="text-sm font-medium text-white/90 flex items-center gap-2">
-                    <Lock className="w-4 h-4" />
-                    Password
-                  </label>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
                   <div className="relative">
-                    <input
+                    <Lock
+                      className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                      strokeWidth={1.75}
+                      aria-hidden
+                    />
+                    <Input
+                      id="password"
+                      name="password"
                       type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full px-4 py-3 pr-12 bg-white/5 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent focus:bg-white/10 transition-all duration-300 backdrop-blur-sm"
-                      placeholder="Enter your password"
+                      className="pl-9 pr-10"
+                      placeholder="Password"
                       required
+                      disabled={isLoading}
                     />
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-white/60 hover:text-white transition-all duration-200 hover:scale-110"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className={cn(
+                        'absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5',
+                        'text-muted-foreground hover:text-foreground',
+                        'outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      )}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      tabIndex={-1}
                     >
-                      {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" strokeWidth={1.75} />
+                      ) : (
+                        <Eye className="h-4 w-4" strokeWidth={1.75} />
+                      )}
                     </button>
                   </div>
                 </div>
 
-                {/* Submit Button */}
                 <Button
                   type="submit"
-                  disabled={isLoading}
-                  className="w-full py-3 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                  className="w-full"
+                  disabled={isLoading || !username || !password}
                 >
                   {isLoading ? (
-                    <div className="flex items-center gap-2">
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Signing in...
-                    </div>
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Signing in…
+                    </>
                   ) : (
-                    <div className="flex items-center gap-2">
-                      <Sparkles className="w-4 h-4" />
-                      Sign In
-                    </div>
+                    'Sign in'
                   )}
                 </Button>
               </form>
             </CardContent>
           </Card>
 
-          {/* Footer */}
-          <div className="text-center mt-8">
-            <p className="text-blue-200/60 text-sm">
-              Secure access to your energy and vehicle data
-            </p>
-          </div>
+          <p className="text-center text-[11px] text-muted-foreground/80">
+            Local dashboard · your data stays on this host
+          </p>
         </div>
       </div>
     </div>

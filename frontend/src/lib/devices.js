@@ -5,6 +5,8 @@
 export const MAKE_LABELS = {
   bitaxe: 'Bitaxe',
   avalon: 'Avalon',
+  nmaxe: 'NMAxe',
+  nerdnos: 'NerdNOS',
   antminer: 'Antminer',
   whatsminer: 'Whatsminer',
   braiins: 'Braiins',
@@ -12,6 +14,14 @@ export const MAKE_LABELS = {
   iceriver: 'IceRiver',
   other: 'Other',
 }
+
+/** Makes selectable when adding a device in Settings. */
+export const SUPPORTED_MAKES = [
+  { value: 'bitaxe', label: 'Bitaxe' },
+  { value: 'avalon', label: 'Avalon' },
+  { value: 'nmaxe', label: 'NMAxe / NMAxeGamma' },
+  { value: 'nerdnos', label: 'NerdNOS' },
+]
 
 export function makeLabel(make) {
   return MAKE_LABELS[make] || (make ? make.charAt(0).toUpperCase() + make.slice(1) : 'Unknown')

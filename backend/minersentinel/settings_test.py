@@ -35,18 +35,47 @@ PASSWORD_HASHERS = [
     'django.contrib.auth.hashers.MD5PasswordHasher',
 ]
 
-# Simplify logging during tests
+# Simplify logging during tests.
+# disable_existing_loggers=True is required so Django's default AdminEmailHandler
+# is not left attached to the django logger. On Python 3.14, that handler's
+# ExceptionReporter path hits a BaseContext.__copy__ crash when the test client
+# captures rendered templates for 500 responses (even with empty ADMINS).
 LOGGING = {
     'version': 1,
-    'disable_existing_loggers': False,
+    'disable_existing_loggers': True,
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
+        },
+        'null': {
+            'class': 'logging.NullHandler',
         },
     },
     'root': {
         'handlers': ['console'],
         'level': 'WARNING',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
+        'django.request': {
+            'handlers': ['console'],
+            'level': 'ERROR',
+            'propagate': False,
+        },
+        'django.server': {
+            'handlers': ['null'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'api': {
+            'handlers': ['console'],
+            'level': 'WARNING',
+            'propagate': False,
+        },
     },
 }
 
