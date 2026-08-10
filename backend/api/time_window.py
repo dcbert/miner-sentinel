@@ -80,10 +80,16 @@ def _parse_iso_datetime(value: Any) -> Optional[datetime]:
 
 
 def _duration_parts(start: datetime, end: datetime, max_hours: int, max_days: int) -> Tuple[int, int]:
-    seconds = max(0.0, (end - start).total_seconds())
-    # Subtract a tiny epsilon so exact N-hour spans (microsecond noise) don't ceil up
-    hours = max(1, min(max_hours, int(ceil(seconds / 3600.0 - 1e-9))))
-    days = max(1, min(max_days, int(ceil(hours / 24.0 - 1e-9))))
+    """Derive hours/days from an absolute span without float-ceil noise.
+
+    Sub-second differences (dual ``now()`` calls, ISO round-trips) must not
+    bump an exact N-hour window to N+1.
+    """
+    raw_seconds = max(0.0, (end - start).total_seconds())
+    # Round to nearest second, then integer-ceil to whole hours
+    whole_seconds = int(raw_seconds + 0.5)
+    hours = max(1, min(max_hours, (whole_seconds + 3599) // 3600))
+    days = max(1, min(max_days, (hours + 23) // 24))
     return hours, days
 
 

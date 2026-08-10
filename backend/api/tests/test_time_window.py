@@ -51,8 +51,10 @@ class TestParseTimeWindow:
         assert w.days == 7
 
     def test_absolute_from_to(self):
-        start = timezone.now() - timedelta(days=3)
-        end = timezone.now() - timedelta(days=1)
+        # Single now() so the span is exactly 48h (no dual-clock microsecond skew)
+        now = timezone.now()
+        start = now - timedelta(days=3)
+        end = now - timedelta(days=1)
         w = parse_time_window({
             'from': start.isoformat(),
             'to': end.isoformat(),
