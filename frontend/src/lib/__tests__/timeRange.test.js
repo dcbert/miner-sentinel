@@ -3,12 +3,15 @@ import {
   DEFAULT_TIME_RANGE_KEY,
   MAX_TIME_RANGE_DAYS,
   TIME_RANGE_STORAGE_KEY,
+  chartTimeAxisFromRange,
   durationParts,
   formatRangeWindow,
   fromDatetimeLocalValue,
+  getChartTimeAxisConfig,
   getPreset,
   isTimeRangeRoute,
   loadStoredTimeRange,
+  parseChartTime,
   resolveTimeRange,
   saveStoredTimeRange,
   toAnalyticsParams,
@@ -133,6 +136,41 @@ describe('timeRange helpers', () => {
     expect(isTimeRangeRoute('/devices/bitaxe/x')).toBe(true)
     expect(isTimeRangeRoute('/settings')).toBe(false)
     expect(isTimeRangeRoute('/login')).toBe(false)
+  })
+
+  it('parseChartTime accepts ISO and unix seconds', () => {
+    const iso = parseChartTime('2026-07-23T12:00:00.000Z')
+    expect(iso).toBeInstanceOf(Date)
+    expect(iso.toISOString()).toBe('2026-07-23T12:00:00.000Z')
+    const sec = parseChartTime(1700000000)
+    expect(sec.getTime()).toBe(1700000000 * 1000)
+  })
+
+  it('getChartTimeAxisConfig adapts labels by window length', () => {
+    const ts = '2026-07-23T15:30:00.000Z'
+    const short = getChartTimeAxisConfig(1)
+    expect(short.bucket).toBe('minutes')
+    // 1h ticks emphasize time-of-day
+    expect(short.tick(ts)).toMatch(/\d/)
+
+    const day = getChartTimeAxisConfig(24)
+    expect(day.bucket).toBe('hours')
+
+    const week = getChartTimeAxisConfig(24 * 7)
+    expect(week.bucket).toBe('days')
+    // multi-day ticks should include a month/day style label (locale-dependent)
+    expect(week.tick(ts).length).toBeGreaterThan(0)
+
+    const month = getChartTimeAxisConfig(24 * 30)
+    expect(month.bucket).toBe('weeks')
+    // tooltip always richer than tick for long ranges
+    expect(month.tooltip(ts).length).toBeGreaterThanOrEqual(month.tick(ts).length)
+  })
+
+  it('chartTimeAxisFromRange uses range.hours', () => {
+    const cfg = chartTimeAxisFromRange({ hours: 6 })
+    expect(cfg.bucket).toBe('minutes')
+    expect(chartTimeAxisFromRange(null).bucket).toBe('hours') // default 24h
   })
 
   it('getPreset falls back to default', () => {

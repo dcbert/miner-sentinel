@@ -224,3 +224,139 @@ export function isTimeRangeRoute(pathname) {
   if (pathname === '/login') return false
   return true
 }
+
+// ---------------------------------------------------------------------------
+// Adaptive chart time axis (depends on selected window length)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse chart time values: ISO strings, Date, unix seconds/ms, or already-local strings.
+ * @param {string|number|Date|null|undefined} value
+ * @returns {Date|null}
+ */
+export function parseChartTime(value) {
+  if (value == null || value === '') return null
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    // Heuristic: values < 1e12 are unix seconds
+    const ms = value < 1e12 ? value * 1000 : value
+    const d = new Date(ms)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+/**
+ * Pick an axis formatting strategy from the window length in hours.
+ *
+ * | Span        | Tick label              | Tooltip                          |
+ * |-------------|-------------------------|----------------------------------|
+ * | ≤ 6h        | HH:mm                   | Mar 5, HH:mm                     |
+ * | ≤ 48h       | Mar 5 HH:mm             | Mar 5, HH:mm                     |
+ * | ≤ 14d       | Mar 5                   | Mar 5, HH:mm                     |
+ * | > 14d       | Mar 5                   | Mar 5, YYYY HH:mm                |
+ *
+ * @param {number} hours
+ * @returns {{
+ *   bucket: 'minutes' | 'hours' | 'days' | 'weeks',
+ *   minTickGap: number,
+ *   interval: 'preserveStartEnd' | number,
+ *   tick: (value: any) => string,
+ *   tooltip: (value: any) => string,
+ * }}
+ */
+export function getChartTimeAxisConfig(hours) {
+  const h = Math.max(1, Number(hours) || 24)
+
+  const fmt = (value, opts) => {
+    const d = parseChartTime(value)
+    if (!d) return typeof value === 'string' ? value : ''
+    return d.toLocaleString(undefined, opts)
+  }
+
+  if (h <= 6) {
+    return {
+      bucket: 'minutes',
+      minTickGap: 48,
+      interval: 'preserveStartEnd',
+      tick: (value) =>
+        fmt(value, { hour: '2-digit', minute: '2-digit' }),
+      tooltip: (value) =>
+        fmt(value, {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+    }
+  }
+
+  if (h <= 48) {
+    return {
+      bucket: 'hours',
+      minTickGap: 56,
+      interval: 'preserveStartEnd',
+      tick: (value) =>
+        fmt(value, {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+      tooltip: (value) =>
+        fmt(value, {
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+    }
+  }
+
+  if (h <= 24 * 14) {
+    return {
+      bucket: 'days',
+      minTickGap: 64,
+      interval: 'preserveStartEnd',
+      tick: (value) =>
+        fmt(value, { month: 'short', day: 'numeric' }),
+      tooltip: (value) =>
+        fmt(value, {
+          weekday: 'short',
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+    }
+  }
+
+  // 30d / 90d / long custom
+  return {
+    bucket: 'weeks',
+    minTickGap: 72,
+    interval: 'preserveStartEnd',
+    tick: (value) =>
+      fmt(value, { month: 'short', day: 'numeric' }),
+    tooltip: (value) =>
+      fmt(value, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+  }
+}
+
+/**
+ * Convenience: build axis config from a resolved range object.
+ * @param {{ hours?: number } | null | undefined} range
+ */
+export function chartTimeAxisFromRange(range) {
+  return getChartTimeAxisConfig(range?.hours ?? 24)
+}

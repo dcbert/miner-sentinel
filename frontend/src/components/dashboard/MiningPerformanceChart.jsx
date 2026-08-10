@@ -1,27 +1,39 @@
-import { Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { getChartTimeAxisConfig } from '@/lib/timeRange'
 
-export default function MiningPerformanceChart({ data, formatAxisHashrate, formatAxisShares, formatHashrate, formatShares }) {
+export default function MiningPerformanceChart({
+  data,
+  rangeHours = 24,
+  formatAxisHashrate,
+  formatAxisShares,
+  formatHashrate,
+  formatShares,
+}) {
   if (!data || data.length === 0) {
     return <div className="flex items-center justify-center h-full text-muted-foreground">No data available</div>
   }
+
+  const timeAxis = getChartTimeAxisConfig(rangeHours)
 
   return (
     <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={data}>
       <defs>
         <linearGradient id="hashrateGradient" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.8}/>
-          <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0.1}/>
+          <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.8}/>
+          <stop offset="95%" stopColor="var(--primary)" stopOpacity={0.1}/>
         </linearGradient>
         <linearGradient id="sharesGradient" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="5%" stopColor="hsl(var(--chart-2))" stopOpacity={0.6}/>
-          <stop offset="95%" stopColor="hsl(var(--chart-2))" stopOpacity={0.05}/>
+          <stop offset="5%" stopColor="var(--chart-2)" stopOpacity={0.6}/>
+          <stop offset="95%" stopColor="var(--chart-2)" stopOpacity={0.05}/>
         </linearGradient>
       </defs>
       <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
       <XAxis
         dataKey="hour"
-        tickFormatter={(value) => new Date(value).toLocaleTimeString('en-US', { hour: '2-digit' })}
+        tickFormatter={timeAxis.tick}
+        minTickGap={timeAxis.minTickGap}
+        interval={timeAxis.interval}
         className="text-xs"
         axisLine={false}
         tickLine={false}
@@ -49,12 +61,7 @@ export default function MiningPerformanceChart({ data, formatAxisHashrate, forma
             return (
               <div className="rounded-lg border bg-background/95 backdrop-blur p-3 shadow-lg">
                 <div className="text-xs text-muted-foreground mb-2">
-                  {new Date(label).toLocaleString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
+                  {timeAxis.tooltip(label)}
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col">
@@ -90,7 +97,7 @@ export default function MiningPerformanceChart({ data, formatAxisHashrate, forma
         yAxisId="hashrate"
         type="monotone"
         dataKey="hashrate_ghs"
-        stroke="hsl(var(--primary))"
+        stroke="var(--primary)"
         fill="url(#hashrateGradient)"
         strokeWidth={2}
         dot={false}
@@ -99,7 +106,7 @@ export default function MiningPerformanceChart({ data, formatAxisHashrate, forma
         yAxisId="shares"
         type="monotone"
         dataKey="shares"
-        stroke="hsl(var(--chart-2))"
+        stroke="var(--chart-2)"
         fill="url(#sharesGradient)"
         strokeWidth={1.5}
         dot={false}

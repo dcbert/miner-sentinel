@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
 import { useTimeRange } from '@/lib/TimeRangeContext';
-import { formatRangeWindow, toAnalyticsParams } from '@/lib/timeRange';
+import { formatRangeWindow, getChartTimeAxisConfig, toAnalyticsParams } from '@/lib/timeRange';
 import {
   Activity,
   AlertTriangle,
@@ -216,7 +216,7 @@ function EnergyAnalysisCard({ energy }) {
   const pieData = devices.map((d, i) => ({
     name: d.device_name || 'Unknown',
     value: d.power_watts || 0,
-    fill: i === 0 ? 'hsl(var(--primary))' : i === 1 ? 'hsl(var(--chart-2))' : `hsl(${220 + i * 40}, 70%, 50%)`
+    fill: i === 0 ? 'var(--primary)' : i === 1 ? 'var(--chart-2)' : `hsl(${220 + i * 40}, 70%, 50%)`
   }))
 
   return (
@@ -509,7 +509,8 @@ function DeviceComparisonTable({ devices }) {
 }
 
 // Historical Best Shares Chart
-function BestSharesHistoryChart({ dailyBests, rangeLabel }) {
+function BestSharesHistoryChart({ dailyBests, rangeLabel, rangeHours = 24 * 30 }) {
+  const timeAxis = getChartTimeAxisConfig(rangeHours)
   if (!dailyBests || dailyBests.length === 0) {
     return (
       <Card>
@@ -526,10 +527,9 @@ function BestSharesHistoryChart({ dailyBests, rangeLabel }) {
     )
   }
 
-  // Format data for chart
+  // Format data for chart — keep raw date for adaptive axis labels
   const chartData = dailyBests.map(item => ({
     date: item.date,
-    dateFormatted: new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     bestEver: item.best_difficulty || 0,           // All-time best difficulty
     bestSession: item.best_session_difficulty || 0, // Session best difficulty
   }))
@@ -564,8 +564,8 @@ function BestSharesHistoryChart({ dailyBests, rangeLabel }) {
             <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id="bestEverGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                  <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="var(--primary)" stopOpacity={0} />
                 </linearGradient>
                 <linearGradient id="bestSessionGradient" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="hsl(24, 95%, 53%)" stopOpacity={0.2} />
@@ -574,7 +574,10 @@ function BestSharesHistoryChart({ dailyBests, rangeLabel }) {
               </defs>
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
               <XAxis
-                dataKey="dateFormatted"
+                dataKey="date"
+                tickFormatter={timeAxis.tick}
+                minTickGap={timeAxis.minTickGap}
+                interval={timeAxis.interval}
                 className="text-xs"
                 axisLine={false}
                 tickLine={false}
@@ -591,11 +594,7 @@ function BestSharesHistoryChart({ dailyBests, rangeLabel }) {
                     return (
                       <div className="rounded-lg border bg-background/95 backdrop-blur p-3 shadow-lg">
                         <div className="text-xs text-muted-foreground mb-2">
-                          {new Date(payload[0]?.payload?.date).toLocaleDateString('en-US', {
-                            weekday: 'short',
-                            month: 'short',
-                            day: 'numeric'
-                          })}
+                          {timeAxis.tooltip(payload[0]?.payload?.date)}
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div className="flex flex-col">
@@ -626,7 +625,7 @@ function BestSharesHistoryChart({ dailyBests, rangeLabel }) {
               <Area
                 type="monotone"
                 dataKey="bestEver"
-                stroke="hsl(var(--primary))"
+                stroke="var(--primary)"
                 fill="url(#bestEverGradient)"
                 strokeWidth={2}
                 name="Best Ever"
@@ -712,7 +711,8 @@ function TopSharesTable({ topShares }) {
 }
 
 // Power Trend Chart
-function PowerTrendChart({ powerTrend }) {
+function PowerTrendChart({ powerTrend, rangeHours = 24 }) {
+  const timeAxis = getChartTimeAxisConfig(rangeHours)
   if (!powerTrend || powerTrend.length === 0) {
     return (
       <Card>
@@ -721,7 +721,7 @@ function PowerTrendChart({ powerTrend }) {
             <Flame className="h-4 w-4 sm:h-5 sm:w-5 text-orange-500" />
             Power & Temperature Trend
           </CardTitle>
-          <CardDescription className="text-xs sm:text-sm">24-hour power consumption and temperature</CardDescription>
+          <CardDescription className="text-xs sm:text-sm">Power consumption and temperature over the selected range</CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-muted-foreground text-center py-6 sm:py-8 text-sm">No power data available</p>
@@ -743,7 +743,7 @@ function PowerTrendChart({ powerTrend }) {
           <Flame className="h-4 w-4 sm:h-5 sm:w-5 text-orange-500" />
           Power & Temperature Trend
         </CardTitle>
-        <CardDescription className="text-xs sm:text-sm">24-hour power consumption and temperature</CardDescription>
+        <CardDescription className="text-xs sm:text-sm">Power consumption and temperature over the selected range</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="h-64">
@@ -752,11 +752,12 @@ function PowerTrendChart({ powerTrend }) {
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
               <XAxis
                 dataKey="time"
-                tickFormatter={(value) => new Date(value).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                tickFormatter={timeAxis.tick}
+                minTickGap={timeAxis.minTickGap}
+                interval={timeAxis.interval}
                 className="text-xs"
                 axisLine={false}
                 tickLine={false}
-                interval="preserveStartEnd"
               />
               <YAxis
                 yAxisId="power"
@@ -780,12 +781,7 @@ function PowerTrendChart({ powerTrend }) {
                     return (
                       <div className="rounded-lg border bg-background/95 backdrop-blur p-3 shadow-lg">
                         <div className="text-xs text-muted-foreground mb-2">
-                          {new Date(label).toLocaleString('en-US', {
-                            month: 'short',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
+                          {timeAxis.tooltip(label)}
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div className="flex flex-col">
@@ -807,7 +803,7 @@ function PowerTrendChart({ powerTrend }) {
                 yAxisId="power"
                 type="monotone"
                 dataKey="power"
-                stroke="hsl(var(--chart-1))"
+                stroke="var(--chart-1)"
                 strokeWidth={2}
                 dot={false}
                 name="Power (W)"
@@ -816,7 +812,7 @@ function PowerTrendChart({ powerTrend }) {
                 yAxisId="temp"
                 type="monotone"
                 dataKey="temp"
-                stroke="hsl(var(--chart-3))"
+                stroke="var(--chart-3)"
                 strokeWidth={2}
                 dot={false}
                 name="Temp (°C)"
@@ -904,7 +900,7 @@ function EfficiencyComparisonChart({ devices }) {
                   return null
                 }}
               />
-              <Bar dataKey="efficiency" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="efficiency" fill="var(--primary)" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -1273,7 +1269,7 @@ export default function AnalyticsDashboard() {
             <PredictionCard prediction={prediction} />
             <TopSharesTable topShares={topShares} />
           </div>
-          <BestSharesHistoryChart dailyBests={dailyBests} rangeLabel={range.label} />
+          <BestSharesHistoryChart dailyBests={dailyBests} rangeLabel={range.label} rangeHours={range.hours} />
         </TabsContent>
 
         {/* SOLO MINING TAB */}
@@ -1289,7 +1285,7 @@ export default function AnalyticsDashboard() {
         <TabsContent value="energy" className="space-y-4 sm:space-y-6">
           <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
             <EnergyAnalysisCard energy={energy} />
-            <PowerTrendChart powerTrend={energy.power_trend} />
+            <PowerTrendChart powerTrend={energy.power_trend} rangeHours={range.hours} />
           </div>
           <EfficiencyComparisonChart devices={devices} />
         </TabsContent>

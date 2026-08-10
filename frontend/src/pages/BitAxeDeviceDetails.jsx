@@ -29,7 +29,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import api from '@/lib/api'
 import { isDeviceOnline } from '@/lib/devices'
 import { useTimeRange } from '@/lib/TimeRangeContext'
-import { formatRangeWindow, toTimeRangeParams } from '@/lib/timeRange'
+import { formatRangeWindow, getChartTimeAxisConfig, toTimeRangeParams } from '@/lib/timeRange'
 
 // ============================================
 // HELPER COMPONENTS
@@ -145,14 +145,11 @@ export default function BitAxeDeviceDetails() {
     }
   }
 
+  const timeAxis = getChartTimeAxisConfig(range.hours)
+
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A'
-    return new Date(dateString).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
+    return timeAxis.tooltip(dateString) || 'N/A'
   }
 
   const formatUptime = (seconds) => {
@@ -182,12 +179,7 @@ export default function BitAxeDeviceDetails() {
       return (
         <div className="rounded-lg border bg-background/95 backdrop-blur p-3 shadow-lg">
           <div className="text-xs text-muted-foreground mb-2">
-            {new Date(label).toLocaleString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit'
-            })}
+            {timeAxis.tooltip(label)}
           </div>
           <div className="space-y-1">
             {payload.map((entry, index) => (
@@ -247,15 +239,15 @@ export default function BitAxeDeviceDetails() {
 
   const { device, latest_mining, latest_hardware, latest_system, hashrate_trend_24h, temperature_trend_24h } = deviceData
 
-  // Prepare chart data
+  // Prepare chart data — keep raw timestamps for adaptive X-axis ticks
   const hashrateChartData = hashrate_trend_24h?.map(stat => ({
-    time: formatDate(stat.recorded_at),
+    time: stat.recorded_at,
     hashrate: stat.hashrate_ghs || 0,
     shares_accepted: stat.shares_accepted,
   })) || []
 
   const temperatureChartData = temperature_trend_24h?.map(log => ({
-    time: formatDate(log.recorded_at),
+    time: log.recorded_at,
     temperature: log.temperature_c || 0,
     power: log.power_watts || 0,
     fan_speed: log.fan_speed_rpm || 0,
@@ -430,14 +422,12 @@ export default function BitAxeDeviceDetails() {
                       <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
                       <XAxis
                         dataKey="time"
+                        tickFormatter={timeAxis.tick}
+                        minTickGap={timeAxis.minTickGap}
+                        interval={timeAxis.interval}
                         className="text-xs"
                         axisLine={false}
                         tickLine={false}
-                        tickFormatter={(value) => {
-                          try {
-                            return new Date(value).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-                          } catch { return value }
-                        }}
                       />
                       <YAxis
                         domain={['dataMin - 0.1', 'dataMax + 0.1']}
@@ -482,7 +472,15 @@ export default function BitAxeDeviceDetails() {
                   <ResponsiveContainer width="100%" height={200}>
                     <LineChart data={temperatureChartData}>
                       <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
-                      <XAxis dataKey="time" className="text-xs" axisLine={false} tickLine={false} tick={false} />
+                      <XAxis
+                        dataKey="time"
+                        tickFormatter={timeAxis.tick}
+                        minTickGap={timeAxis.minTickGap}
+                        interval={timeAxis.interval}
+                        className="text-xs"
+                        axisLine={false}
+                        tickLine={false}
+                      />
                       <YAxis domain={['dataMin - 2', 'dataMax + 2']} className="text-xs" axisLine={false} tickLine={false} tickFormatter={(v) => `${v}°`} />
                       <Tooltip content={<CustomTooltip />} />
                       <Line type="monotone" dataKey="temperature" stroke="#ef4444" strokeWidth={2} name="Temperature" dot={false} />
@@ -507,7 +505,15 @@ export default function BitAxeDeviceDetails() {
                   <ResponsiveContainer width="100%" height={200}>
                     <LineChart data={temperatureChartData}>
                       <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
-                      <XAxis dataKey="time" className="text-xs" axisLine={false} tickLine={false} tick={false} />
+                      <XAxis
+                        dataKey="time"
+                        tickFormatter={timeAxis.tick}
+                        minTickGap={timeAxis.minTickGap}
+                        interval={timeAxis.interval}
+                        className="text-xs"
+                        axisLine={false}
+                        tickLine={false}
+                      />
                       <YAxis domain={['dataMin - 1', 'dataMax + 1']} className="text-xs" axisLine={false} tickLine={false} tickFormatter={(v) => `${v}W`} />
                       <Tooltip content={<CustomTooltip />} />
                       <Line type="monotone" dataKey="power" stroke="#f59e0b" strokeWidth={2} name="Power" dot={false} />

@@ -62,7 +62,7 @@ export default function LoginPage({ onLogin }) {
         className="pointer-events-none absolute inset-0 overflow-hidden"
         aria-hidden
       >
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_hsl(var(--muted)/0.45)_0%,_transparent_55%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_color-mix(in oklch, var(--muted) 45%, transparent)_0%,_transparent_55%)]" />
         <div
           className="absolute inset-0 opacity-[0.035] dark:opacity-[0.06]"
           style={{

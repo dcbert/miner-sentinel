@@ -96,3 +96,10 @@ export const formatAxisPower = (value) => {
   }
   return `${n.toFixed(0)}W`
 }
+
+// Re-export adaptive time-axis helpers (window-aware chart labels)
+export {
+  chartTimeAxisFromRange,
+  getChartTimeAxisConfig,
+  parseChartTime,
+} from '@/lib/timeRange'

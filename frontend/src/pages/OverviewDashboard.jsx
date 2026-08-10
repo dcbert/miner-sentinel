@@ -376,6 +376,7 @@ export default function OverviewDashboard() {
               <div className="h-[200px]">
                 <MiningPerformanceChart
                   data={trends.hourly_hashrate}
+                  rangeHours={range.hours}
                   formatAxisHashrate={formatAxisHashrate}
                   formatAxisShares={formatAxisShares}
                   formatHashrate={formatHashrate}
@@ -407,6 +408,7 @@ export default function OverviewDashboard() {
               <div className="h-[200px]">
                 <HardwareHealthChart
                   data={trends.hourly_hardware}
+                  rangeHours={range.hours}
                   formatAxisPower={formatAxisPower}
                 />
               </div>

@@ -26,7 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import api from '@/lib/api';
 import { deviceDetailPath, isDeviceOnline, makeLabel, unwrapList } from '@/lib/devices';
 import { useTimeRange } from '@/lib/TimeRangeContext';
-import { formatRangeWindow, toTimeRangeParams } from '@/lib/timeRange';
+import { getChartTimeAxisConfig, formatRangeWindow, toTimeRangeParams } from '@/lib/timeRange';
 
 // ============================================
 // HELPER COMPONENTS
@@ -320,17 +320,15 @@ export default function MiningDashboard() {
     return formatNumber(value)
   }
 
+  // Adaptive X-axis labels based on selected global time range
+  const timeAxis = getChartTimeAxisConfig(range.hours)
+
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       return (
         <div className="rounded-lg border bg-background/95 backdrop-blur p-3 shadow-lg">
           <div className="text-xs text-muted-foreground mb-2">
-            {new Date(label).toLocaleString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit'
-            })}
+            {timeAxis.tooltip(label)}
           </div>
           <div className="space-y-1">
             {payload.map((entry, index) => (
@@ -398,11 +396,12 @@ export default function MiningDashboard() {
   }
 
   // Prepare chart data for hashrate trends (trend endpoint is ascending; list may be reverse)
+  // Keep raw timestamps so tickFormatter can adapt to the window length.
   const sortedPool = [...poolStats].sort(
     (a, b) => new Date(a.recorded_at) - new Date(b.recorded_at),
   )
   const hashrateChartData = sortedPool.map((stat) => ({
-    time: formatDate(stat.recorded_at),
+    time: stat.recorded_at,
     hashrate_1m_ghs: stat.hashrate_1m_ghs || 0,
     hashrate_1d_ghs: stat.hashrate_1d_ghs || 0,
     shares: stat.shares,
@@ -639,6 +638,9 @@ export default function MiningDashboard() {
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
                     <XAxis
                       dataKey="time"
+                      tickFormatter={timeAxis.tick}
+                      minTickGap={timeAxis.minTickGap}
+                      interval={timeAxis.interval}
                       className="text-xs"
                       axisLine={false}
                       tickLine={false}
@@ -912,16 +914,12 @@ export default function MiningDashboard() {
                     <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
                     <XAxis
                       dataKey="time"
+                      tickFormatter={timeAxis.tick}
+                      minTickGap={timeAxis.minTickGap}
+                      interval={timeAxis.interval}
                       className="text-xs"
                       axisLine={false}
                       tickLine={false}
-                      tickFormatter={(value) => {
-                        try {
-                          return new Date(value).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-                        } catch {
-                          return value
-                        }
-                      }}
                     />
                     <YAxis
                       tickFormatter={formatYAxisShares}

@@ -1,27 +1,39 @@
 import { Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { getChartTimeAxisConfig } from '@/lib/timeRange'
 
-export default function BestSharesChart({ data, formatAxisDifficulty, formatAxisHashrate, formatHashrate, formatNumber }) {
+export default function BestSharesChart({
+  data,
+  rangeHours = 24,
+  formatAxisDifficulty,
+  formatAxisHashrate,
+  formatHashrate,
+  formatNumber,
+}) {
+  const timeAxis = getChartTimeAxisConfig(rangeHours)
+
   return (
     <ResponsiveContainer width="100%" height="100%">
       <AreaChart data={data}>
         <defs>
           <linearGradient id="bitaxeBestShareGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="hsl(var(--chart-4))" stopOpacity={0.8}/>
-            <stop offset="95%" stopColor="hsl(var(--chart-4))" stopOpacity={0.1}/>
+            <stop offset="5%" stopColor="var(--chart-4)" stopOpacity={0.8}/>
+            <stop offset="95%" stopColor="var(--chart-4)" stopOpacity={0.1}/>
           </linearGradient>
           <linearGradient id="avalonBestShareGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="hsl(var(--chart-2))" stopOpacity={0.8}/>
-            <stop offset="95%" stopColor="hsl(var(--chart-2))" stopOpacity={0.1}/>
+            <stop offset="5%" stopColor="var(--chart-2)" stopOpacity={0.8}/>
+            <stop offset="95%" stopColor="var(--chart-2)" stopOpacity={0.1}/>
           </linearGradient>
           <linearGradient id="hashrateBgGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.2}/>
-            <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0.02}/>
+            <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.2}/>
+            <stop offset="95%" stopColor="var(--primary)" stopOpacity={0.02}/>
           </linearGradient>
         </defs>
       <CartesianGrid strokeDasharray="3 3" className="stroke-muted/30" />
       <XAxis
         dataKey="hour"
-        tickFormatter={(value) => new Date(value).toLocaleTimeString('en-US', { hour: '2-digit' })}
+        tickFormatter={timeAxis.tick}
+        minTickGap={timeAxis.minTickGap}
+        interval={timeAxis.interval}
         className="text-xs"
         axisLine={false}
         tickLine={false}
@@ -55,12 +67,7 @@ export default function BestSharesChart({ data, formatAxisDifficulty, formatAxis
             return (
               <div className="rounded-lg border bg-background/95 backdrop-blur p-3 shadow-lg">
                 <div className="text-xs text-muted-foreground mb-2">
-                  {new Date(label).toLocaleString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })}
+                  {timeAxis.tooltip(label)}
                 </div>
                 <div className="space-y-2">
                   {bitaxeBestShare && bitaxeBestShare > 0 && (
@@ -140,7 +147,7 @@ export default function BestSharesChart({ data, formatAxisDifficulty, formatAxis
         yAxisId="hashrate"
         type="monotone"
         dataKey="hashrate_ghs"
-        stroke="hsl(var(--primary))"
+        stroke="var(--primary)"
         fill="url(#hashrateBgGradient)"
         strokeWidth={1}
         dot={false}
@@ -149,23 +156,23 @@ export default function BestSharesChart({ data, formatAxisDifficulty, formatAxis
         yAxisId="shares"
         type="stepAfter"
         dataKey="bitaxe_best_share"
-        stroke="hsl(var(--chart-4))"
+        stroke="var(--chart-4)"
         fill="url(#bitaxeBestShareGradient)"
         strokeWidth={3}
         connectNulls={false}
         dot={false}
-        activeDot={{ r: 6, fill: "hsl(var(--chart-4))", strokeWidth: 2, stroke: "hsl(var(--background))" }}
+        activeDot={{ r: 6, fill: "var(--chart-4)", strokeWidth: 2, stroke: "var(--background)" }}
       />
       <Area
         yAxisId="shares"
         type="stepAfter"
         dataKey="avalon_best_share"
-        stroke="hsl(var(--chart-2))"
+        stroke="var(--chart-2)"
         fill="url(#avalonBestShareGradient)"
         strokeWidth={2}
         connectNulls={false}
         dot={false}
-        activeDot={{ r: 5, fill: "hsl(var(--chart-2))", strokeWidth: 2, stroke: "hsl(var(--background))" }}
+        activeDot={{ r: 5, fill: "var(--chart-2)", strokeWidth: 2, stroke: "var(--background)" }}
       />
     </AreaChart>
   </ResponsiveContainer>
