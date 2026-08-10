@@ -7,6 +7,7 @@ import math
 
 from django.db.models import Avg, Count, Max, Min, Q, Sum
 from django.db.models.functions import TruncDay, TruncHour
+from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -63,10 +64,26 @@ def overview_analytics(request):
     hours, days = window.hours, window.days
     time_filter = window.as_filter()
 
-    active_devices = Device.objects.filter(is_active=True)
-    bitaxe_count = active_devices.filter(make=Device.MAKE_BITAXE).count()
-    avalon_count = active_devices.filter(make=Device.MAKE_AVALON).count()
-    total_device_count = active_devices.count()
+    # Enabled for collection (registry flag) — not the same as "online"
+    enabled_devices = Device.objects.filter(is_active=True)
+    all_devices = Device.objects.all()
+    bitaxe_count = enabled_devices.filter(make=Device.MAKE_BITAXE).count()
+    avalon_count = enabled_devices.filter(make=Device.MAKE_AVALON).count()
+    nmaxe_count = enabled_devices.filter(make=Device.MAKE_NMAXE).count()
+    nerdnos_count = enabled_devices.filter(make=Device.MAKE_NERDNOS).count()
+    enabled_device_count = enabled_devices.count()
+    total_registered = all_devices.count()
+
+    # Online ≈ enabled + recent last_seen + no error (align with frontend ONLINE_MAX_AGE)
+    online_cutoff = window.end - timezone.timedelta(minutes=10)
+    online_count = enabled_devices.filter(last_seen_at__gte=online_cutoff).filter(
+        Q(error_message__isnull=True) | Q(error_message='')
+    ).count()
+
+    make_breakdown = list(
+        all_devices.values('make').annotate(count=Count('id')).order_by('make')
+    )
+    devices_by_make = {row['make']: row['count'] for row in make_breakdown}
 
     # Charts and period KPIs share the same bounds so 1h/6h/custom match the picker
     mining_recent = DeviceMiningStats.objects.filter(**time_filter)
@@ -78,11 +95,20 @@ def overview_analytics(request):
     )
     pool_stats_period = PoolStats.objects.filter(**time_filter)
 
+    # Backward-compat: active_devices = online count (fleet pulse "X online")
     result = {
         'overview': {
-            'active_devices': total_device_count,
+            'active_devices': online_count,
+            'online_devices': online_count,
+            'enabled_devices': enabled_device_count,
+            'total_devices': total_registered,
+            'offline_devices': max(0, enabled_device_count - online_count),
+            'inactive_devices': max(0, total_registered - enabled_device_count),
             'bitaxe_devices': bitaxe_count,
             'avalon_devices': avalon_count,
+            'nmaxe_devices': nmaxe_count,
+            'nerdnos_devices': nerdnos_count,
+            'devices_by_make': devices_by_make,
             'data_collection_period_hours': hours,
             'analysis_period_days': days,
             'window_start': window.start.isoformat(),
@@ -99,7 +125,7 @@ def overview_analytics(request):
     current_hashrate_total_ghs = 0.0
     current_shares_accepted = 0
     current_shares_rejected = 0
-    for device in active_devices:
+    for device in enabled_devices:
         latest = DeviceMiningStats.objects.filter(device=device).first()
         if latest:
             current_hashrate_total_ghs += latest.hashrate_ghs or 0
@@ -159,13 +185,32 @@ def overview_analytics(request):
         .first()
     )
 
+
+    # Fleet stability from hourly totals (not min/max of every sample — avoids
+    # offline zeros and mixed device scales destroying the score).
+    hourly_rows = list(
+        mining_period.annotate(bucket=TruncHour('recorded_at'))
+        .values('bucket')
+        .annotate(total=Sum('hashrate_ghs'))
+        .order_by('bucket')
+    )
+    hourly_totals = [float(r['total'] or 0) for r in hourly_rows if (r['total'] or 0) > 0]
+    if len(hourly_totals) >= 2:
+        avg_hr = sum(hourly_totals) / len(hourly_totals)
+        var_hr = sum((t - avg_hr) ** 2 for t in hourly_totals) / len(hourly_totals)
+        cv = (var_hr ** 0.5) / avg_hr if avg_hr else 0
+        # CV 0 → 100% stable; CV ≥ 0.5 → 0%
+        hashrate_stability = max(0.0, min(100.0, round((1.0 - min(cv / 0.5, 1.0)) * 100, 1)))
+    elif len(hourly_totals) == 1:
+        hashrate_stability = 100.0
+    else:
+        hashrate_stability = 0.0
+
     result['mining']['period'] = {
         'avg_hashrate_ghs': round(combined_avg_hashrate, 2),
         'max_hashrate_ghs': round(combined_max_hashrate, 2),
         'min_hashrate_ghs': round(combined_min_hashrate, 2),
-        'hashrate_stability': round(
-            (combined_min_hashrate / combined_max_hashrate * 100), 1
-        ) if combined_max_hashrate else 0,
+        'hashrate_stability': hashrate_stability,
         'total_shares_accepted': combined_shares_accepted,
         'total_shares_rejected': combined_shares_rejected,
         'total_shares': combined_shares_accepted + combined_shares_rejected,
@@ -182,12 +227,12 @@ def overview_analytics(request):
         ) if (combined_shares_accepted + combined_shares_rejected) > 0 else 0,
         'best_share_ever': best_row['best_difficulty'] if best_row else 0,
         'best_share_timestamp': best_row['recorded_at'].isoformat() if best_row else None,
-        'avg_efficiency': round(combined_avg_hashrate / total_device_count, 2) if total_device_count else 0,
+        'avg_efficiency': round(combined_avg_hashrate / enabled_device_count, 2) if enabled_device_count else 0,
     }
 
     current_temp_total = current_power_total = current_fan_speed_total = 0.0
     current_temp_count = current_power_count = current_fan_speed_count = 0
-    for device in active_devices:
+    for device in enabled_devices:
         hw = DeviceHardwareStats.objects.filter(device=device).first()
         if not hw:
             continue

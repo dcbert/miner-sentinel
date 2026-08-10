@@ -2,7 +2,7 @@
 """
 Test Bitaxe collector with Nerdqaxe device response (missing overheat_mode).
 
-Release B writes unified tables only (dual_write=False). Nerdqaxe-specific
+Writes unified tables only. Nerdqaxe-specific
 defaults (overheat_mode, rotation, displayTimeout) live in normalize_system_info
 details, not legacy bitaxe_system_info inserts.
 """
@@ -79,7 +79,7 @@ class TestBitaxeNerdqaxeSupport(unittest.TestCase):
         """Missing Nerdqaxe fields get sensible defaults in normalized snapshot."""
         from collectors.bitaxe_collector import BitAxeCollector
 
-        collector = BitAxeCollector(self.database_url, dual_write=False)
+        collector = BitAxeCollector(self.database_url)
         snap = collector.normalize_system_info(self._nerdqaxe_response(), 'nerdqaxe-1')
 
         self.assertTrue(snap.online)
@@ -123,7 +123,7 @@ class TestBitaxeNerdqaxeSupport(unittest.TestCase):
         mock_conn.cursor.return_value = mock_cursor
         mock_connect.return_value = mock_conn
 
-        collector = BitAxeCollector(self.database_url, dual_write=False)
+        collector = BitAxeCollector(self.database_url)
         collector.collect_device_data('test-device', '192.168.1.100')
 
         self.assertTrue(mock_cursor.execute.called)
@@ -135,7 +135,7 @@ class TestBitaxeNerdqaxeSupport(unittest.TestCase):
 
         self.assertTrue(len(unified_mining) > 0, "Expected INSERT into device_mining_stats")
         self.assertTrue(len(unified_system) > 0, "Expected INSERT into device_system_info")
-        self.assertEqual(len(legacy_system), 0, "Release B must not write legacy bitaxe_system_info")
+        self.assertEqual(len(legacy_system), 0, "Must not write legacy bitaxe_system_info")
 
     @patch('psycopg2.connect')
     @patch('requests.get')
@@ -212,7 +212,7 @@ class TestBitaxeNerdqaxeSupport(unittest.TestCase):
         mock_conn.cursor.return_value = mock_cursor
         mock_connect.return_value = mock_conn
 
-        collector = BitAxeCollector(self.database_url, dual_write=False)
+        collector = BitAxeCollector(self.database_url)
         collector.collect_device_data('test-device', '192.168.1.101')
 
         self.assertTrue(mock_cursor.execute.called)

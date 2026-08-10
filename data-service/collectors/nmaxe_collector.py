@@ -40,13 +40,13 @@ class NMAxeCollector:
 
     MAKE = 'nmaxe'
 
-    def __init__(self, database_url, dual_write=False):
+    def __init__(self, database_url):
         self.database_url = database_url
         self.devices = []
         self.telegram_notifier = TelegramNotifier()
         self.discord_notifier = DiscordNotifier()
         self.notification_rules = NotificationRules()
-        self.writer = DeviceDataWriter(database_url, dual_write=dual_write)
+        self.writer = DeviceDataWriter(database_url)
 
     def update_telegram_settings(self, enabled, bot_token, chat_id):
         if enabled and bot_token and chat_id:

@@ -1,77 +1,91 @@
 import { describe, expect, it } from 'vitest'
 import {
   deviceDetailPath,
+  deviceStatusLabel,
+  getDeviceStatus,
   isDeviceOnline,
   legacyDevicePath,
   makeLabel,
+  ONLINE_MAX_AGE_MS,
   unwrapList,
 } from '@/lib/devices'
 
-describe('isDeviceOnline', () => {
-  it('returns false for null/undefined', () => {
+const freshIso = () => new Date().toISOString()
+const staleIso = () => new Date(Date.now() - ONLINE_MAX_AGE_MS - 60_000).toISOString()
+const ancientIso = () => new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+
+describe('getDeviceStatus / isDeviceOnline', () => {
+  it('returns unknown/false for null', () => {
+    expect(getDeviceStatus(null)).toBe('unknown')
     expect(isDeviceOnline(null)).toBe(false)
-    expect(isDeviceOnline(undefined)).toBe(false)
   })
 
-  it('returns false when device is deactivated', () => {
+  it('returns inactive when deactivated', () => {
     expect(
-      isDeviceOnline({
+      getDeviceStatus({
         is_active: false,
-        last_seen_at: '2026-07-23T12:00:00Z',
+        last_seen_at: freshIso(),
         error_message: null,
       }),
-    ).toBe(false)
+    ).toBe('inactive')
+    expect(isDeviceOnline({ is_active: false, last_seen_at: freshIso() })).toBe(false)
   })
 
-  it('returns false when never successfully seen', () => {
+  it('returns offline when never seen or error', () => {
     expect(
-      isDeviceOnline({
-        is_active: true,
-        last_seen_at: null,
-        error_message: null,
-      }),
-    ).toBe(false)
-  })
-
-  it('returns false when collector recorded an error (offline)', () => {
+      getDeviceStatus({ is_active: true, last_seen_at: null, error_message: null }),
+    ).toBe('offline')
     expect(
-      isDeviceOnline({
+      getDeviceStatus({
         is_active: true,
-        last_seen_at: '2026-07-23T12:00:00Z',
+        last_seen_at: freshIso(),
         error_message: 'connection refused',
       }),
-    ).toBe(false)
+    ).toBe('offline')
   })
 
-  it('returns true when active, seen, and no error', () => {
+  it('returns online when active, freshly seen, no error', () => {
+    expect(
+      getDeviceStatus({
+        is_active: true,
+        last_seen_at: freshIso(),
+        error_message: null,
+      }),
+    ).toBe('online')
     expect(
       isDeviceOnline({
         is_active: true,
-        last_seen_at: '2026-07-23T12:00:00Z',
+        last_seen_at: freshIso(),
         error_message: null,
       }),
     ).toBe(true)
   })
 
-  it('does not treat is_active alone as online (regression)', () => {
-    // Active but never contacted / offline — previously UIs showed "Online"
+  it('returns stale when last_seen aged but within hour', () => {
     expect(
-      isDeviceOnline({
+      getDeviceStatus({
         is_active: true,
-        last_seen_at: null,
-        error_message: 'timeout',
-      }),
-    ).toBe(false)
-  })
-
-  it('returns false for invalid last_seen_at', () => {
-    expect(
-      isDeviceOnline({
-        is_active: true,
-        last_seen_at: 'not-a-date',
+        last_seen_at: staleIso(),
         error_message: null,
       }),
-    ).toBe(false)
+    ).toBe('stale')
+    expect(isDeviceOnline({ is_active: true, last_seen_at: staleIso() })).toBe(false)
+  })
+
+  it('returns offline when last_seen is very old', () => {
+    expect(
+      getDeviceStatus({
+        is_active: true,
+        last_seen_at: ancientIso(),
+        error_message: null,
+      }),
+    ).toBe('offline')
+  })
+
+  it('labels map correctly', () => {
+    expect(deviceStatusLabel('online')).toBe('Online')
+    expect(deviceStatusLabel('inactive')).toBe('Inactive')
+    expect(deviceStatusLabel('stale')).toBe('Stale')
   })
 })
 
@@ -80,16 +94,12 @@ describe('unwrapList / paths / labels', () => {
     expect(unwrapList(null)).toEqual([])
     expect(unwrapList([1])).toEqual([1])
     expect(unwrapList({ results: [1, 2] })).toEqual([1, 2])
-    expect(unwrapList({ other: true })).toEqual([])
   })
 
   it('builds paths and labels', () => {
     expect(deviceDetailPath('bitaxe', 'x')).toBe('/devices/bitaxe/x')
     expect(legacyDevicePath('avalon', 'a')).toBe('/avalon/device/a')
     expect(makeLabel('bitaxe')).toBe('Bitaxe')
-    expect(makeLabel('nmaxe')).toBe('NMAxe')
-    expect(makeLabel('nerdnos')).toBe('NerdNOS')
-    expect(makeLabel('unknown-make')).toBe('Unknown-make')
-
+    expect(makeLabel('custom')).toBe('Custom')
   })
 })

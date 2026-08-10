@@ -20,6 +20,12 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
+import MakeBadge, { makeIconPlateClass } from '@/components/devices/MakeBadge'
+import ErrorState from '@/components/feedback/ErrorState'
+import DataFreshness from '@/components/metrics/DataFreshness'
+import HealthBar from '@/components/metrics/HealthBar'
+import MetricCard from '@/components/metrics/MetricCard'
+import StatusIndicator from '@/components/status/StatusIndicator'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -27,54 +33,21 @@ import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import api from '@/lib/api'
-import { isDeviceOnline } from '@/lib/devices'
+import { deviceStatusLabel, getDeviceStatus, makeLabel } from '@/lib/devices'
+import {
+  formatDifficulty,
+  formatHashrate,
+  formatNumber,
+  formatPower,
+  formatRelativeTime,
+  formatTemp,
+} from '@/lib/formatters'
 import { useTimeRange } from '@/lib/TimeRangeContext'
 import { formatRangeWindow, getChartTimeAxisConfig, toTimeRangeParams } from '@/lib/timeRange'
 
 // ============================================
 // HELPER COMPONENTS
 // ============================================
-
-// Status indicator with animated pulse
-function StatusIndicator({ status = 'online', size = 'md' }) {
-  const colors = {
-    online: 'bg-green-500',
-    warning: 'bg-yellow-500',
-    offline: 'bg-red-500',
-  }
-  const sizes = {
-    sm: 'h-2 w-2',
-    md: 'h-2.5 w-2.5',
-    lg: 'h-3 w-3',
-  }
-  return (
-    <span className="relative flex">
-      <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${colors[status]} ${sizes[size]}`}></span>
-      <span className={`relative inline-flex rounded-full ${colors[status]} ${sizes[size]}`}></span>
-    </span>
-  )
-}
-
-// Quick stat card for the hero section
-function QuickStat({ icon: Icon, label, value, subValue, status, iconColor = 'text-primary' }) {
-  return (
-    <div className="flex items-center gap-2 sm:gap-3 p-3 sm:p-4 rounded-xl bg-muted/30 border">
-      <div className={`p-2 sm:p-2.5 rounded-lg bg-background ${iconColor}`}>
-        <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-[10px] sm:text-xs text-muted-foreground">{label}</p>
-        <p className="text-base sm:text-xl font-bold truncate">{value}</p>
-        {subValue && <p className="text-[10px] sm:text-xs text-muted-foreground truncate">{subValue}</p>}
-      </div>
-      {status && (
-        <Badge variant={status === 'good' ? 'default' : status === 'warning' ? 'secondary' : 'destructive'} className="ml-auto text-[10px] sm:text-xs">
-          {status === 'good' ? 'OK' : status === 'warning' ? 'Warm' : 'Hot'}
-        </Badge>
-      )}
-    </div>
-  )
-}
 
 // Info row for detail sections
 function InfoRow({ label, value, mono = false, badge = null }) {
@@ -90,31 +63,6 @@ function InfoRow({ label, value, mono = false, badge = null }) {
   )
 }
 
-// Health indicator bar
-function HealthBar({ label, value, max, unit = '', thresholds = { warning: 60, danger: 70 } }) {
-  const percentage = Math.min((value / max) * 100, 100)
-  const status = value > thresholds.danger ? 'danger' : value > thresholds.warning ? 'warning' : 'normal'
-  const colors = {
-    normal: 'bg-green-500',
-    warning: 'bg-yellow-500',
-    danger: 'bg-red-500',
-  }
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-medium">{value?.toFixed(1)}{unit}</span>
-      </div>
-      <div className="h-2 rounded-full bg-muted overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all ${colors[status]}`}
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
-    </div>
-  )
-}
-
 export default function BitAxeDeviceDetails() {
   const { deviceId, make: makeParam } = useParams()
   const make = makeParam || 'bitaxe'
@@ -122,6 +70,7 @@ export default function BitAxeDeviceDetails() {
   const { range } = useTimeRange()
   const [deviceData, setDeviceData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [updatedAt, setUpdatedAt] = useState(null)
 
   useEffect(() => {
     fetchDeviceDetails()
@@ -137,6 +86,7 @@ export default function BitAxeDeviceDetails() {
       const params = toTimeRangeParams(range)
       const response = await api.get(`/api/devices/${make}/${deviceId}/details/`, { params })
       setDeviceData(response.data)
+      setUpdatedAt(new Date())
     } catch (error) {
       console.error('Error fetching device details:', error)
       setDeviceData(null)
@@ -159,20 +109,7 @@ export default function BitAxeDeviceDetails() {
     return `${hours}h ${minutes}m`
   }
 
-  const formatNumber = (num) => {
-    if (!num) return '0'
-    if (num >= 1e15) return (num / 1e15).toFixed(1) + 'P'
-    if (num >= 1e12) return (num / 1e12).toFixed(1) + 'T'
-    if (num >= 1e9) return (num / 1e9).toFixed(1) + 'G'
-    if (num >= 1e6) return (num / 1e6).toFixed(1) + 'M'
-    if (num >= 1e3) return (num / 1e3).toFixed(1) + 'K'
-    return num.toString()
-  }
-
-  const formatHashrateGH = (value) => {
-    if (!value) return '0 GH/s'
-    return `${parseFloat(value).toFixed(2)} GH/s`
-  }
+  const formatHashrateGH = (value) => formatHashrate(value)
 
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
@@ -223,21 +160,25 @@ export default function BitAxeDeviceDetails() {
 
   if (!deviceData) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <Button variant="outline" size="icon" onClick={() => navigate('/mining')}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div>
-            <h1 className="text-3xl font-bold">Device Not Found</h1>
-            <p className="text-muted-foreground">The requested device could not be found</p>
-          </div>
-        </div>
+      <div className="space-y-4">
+        <Button variant="ghost" size="sm" onClick={() => navigate('/mining')} className="gap-2">
+          <ArrowLeft className="h-4 w-4" />
+          Back to Mining
+        </Button>
+        <ErrorState
+          title="Device not found"
+          description="The requested device could not be loaded. It may have been removed or the API is unavailable."
+          onRetry={fetchDeviceDetails}
+        />
       </div>
     )
   }
 
   const { device, latest_mining, latest_hardware, latest_system, hashrate_trend_24h, temperature_trend_24h } = deviceData
+
+  const deviceStatus = getDeviceStatus(device)
+  const isOnline = deviceStatus === 'online'
+  const isOfflineLike = deviceStatus === 'offline' || deviceStatus === 'inactive' || deviceStatus === 'stale'
 
   // Prepare chart data — keep raw timestamps for adaptive X-axis ticks
   const hashrateChartData = hashrate_trend_24h?.map(stat => ({
@@ -264,80 +205,138 @@ export default function BitAxeDeviceDetails() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* ============================================ */}
-      {/* HEADER - Device info with back button */}
-      {/* ============================================ */}
+      {/* Contextual identity header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/mining')} className="w-8 h-8 sm:w-10 sm:h-10 shrink-0 self-start">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => navigate('/mining')}
+          className="h-8 w-8 shrink-0 self-start sm:h-10 sm:w-10"
+          aria-label="Back to Mining"
+        >
           <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
         </Button>
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="p-1.5 sm:p-2 rounded-lg bg-blue-500/10">
-              <Cpu className="h-4 w-4 sm:h-5 sm:w-5 text-blue-500" />
-            </div>
+            {(() => {
+              const plate = makeIconPlateClass(make)
+              const Icon = plate.Icon
+              return (
+                <div className="rounded-lg bg-muted p-1.5 sm:p-2">
+                  <Icon className="h-4 w-4 sm:h-5 sm:w-5" style={plate.iconStyle} strokeWidth={1.75} />
+                </div>
+              )
+            })()}
             <div className="min-w-0">
-              <h1 className="text-lg sm:text-2xl font-bold tracking-tight truncate">{device.device_name}</h1>
-              <p className="text-xs sm:text-sm text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="truncate text-lg font-bold tracking-tight sm:text-2xl">{device.device_name}</h1>
+                <MakeBadge make={make} />
+              </div>
+              <p className="text-xs text-muted-foreground sm:text-sm">
                 <span className="font-mono">{device.device_id}</span>
-                <span className="mx-1 sm:mx-2">•</span>
+                <span className="mx-1 sm:mx-2">·</span>
                 <span className="font-mono">{device.ip_address}</span>
+                {latest_system?.firmware_version && (
+                  <>
+                    <span className="mx-1 sm:mx-2">·</span>
+                    <span>fw {latest_system.firmware_version}</span>
+                  </>
+                )}
               </p>
-              <p className="text-[10px] text-muted-foreground/80 mt-0.5">
-                Charts: {range.label.toLowerCase()}
-                <span className="hidden sm:inline"> · {formatRangeWindow(range)}</span>
-              </p>
+              <div className="mt-1 flex flex-wrap items-center gap-3">
+                <p className="text-[10px] text-muted-foreground/80">
+                  Charts: {range.label.toLowerCase()}
+                  <span className="hidden sm:inline"> · {formatRangeWindow(range)}</span>
+                </p>
+                <DataFreshness updatedAt={updatedAt} live />
+              </div>
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2 sm:gap-3 self-end sm:self-auto">
+        <div className="flex items-center gap-2 self-end sm:gap-3 sm:self-auto">
           <Badge
-            variant={isDeviceOnline(device) ? 'default' : 'destructive'}
-            className="px-2 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm"
+            variant={isOnline ? 'default' : deviceStatus === 'stale' ? 'secondary' : 'destructive'}
+            className="px-2 py-1 text-xs sm:px-3 sm:py-1.5 sm:text-sm"
           >
-            <StatusIndicator status={isDeviceOnline(device) ? 'online' : 'offline'} size="sm" />
-            <span className="ml-1.5 sm:ml-2">{isDeviceOnline(device) ? 'Online' : 'Offline'}</span>
+            <StatusIndicator status={deviceStatus === 'online' ? 'online' : deviceStatus === 'stale' ? 'stale' : deviceStatus === 'inactive' ? 'unknown' : 'offline'} size="sm" />
+            <span className="ml-1.5 sm:ml-2">{deviceStatusLabel(deviceStatus)}</span>
           </Badge>
           <Button variant="outline" size="sm" onClick={fetchDeviceDetails} disabled={loading} className="h-8 sm:h-9">
             <RefreshCw className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${loading ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline ml-2">Refresh</span>
+            <span className="ml-2 hidden sm:inline">Refresh</span>
           </Button>
         </div>
       </div>
+
+      {isOfflineLike && (
+        <div
+          className={
+            deviceStatus === 'stale'
+              ? 'rounded-lg border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-sm text-status-warning-fg'
+              : deviceStatus === 'inactive'
+                ? 'rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground'
+                : 'rounded-lg border border-status-critical/30 bg-status-critical/10 px-3 py-2 text-sm text-status-critical-fg'
+          }
+          role="status"
+        >
+          {deviceStatus === 'inactive' && 'Device inactive — collection is disabled. Showing last known stats.'}
+          {deviceStatus === 'stale' && 'Data may be stale — last poll is older than expected. Showing last known stats.'}
+          {deviceStatus === 'offline' && 'Device offline — showing last known stats.'}
+          {device.last_seen_at && (
+            <span className="text-muted-foreground">
+              {' '}
+              · last seen {formatRelativeTime(device.last_seen_at)}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* ============================================ */}
       {/* HERO STATS - Key metrics at a glance */}
       {/* ============================================ */}
       {latest_mining && latest_hardware && (
-        <div className="grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4">
-          <QuickStat
+        <div className={`grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4 ${isOfflineLike ? 'opacity-80' : ''}`}>
+          <MetricCard
+            variant="inline"
             icon={Hash}
-            label="Hashrate"
-            value={`${latest_mining.hashrate_ghs?.toFixed(2)} GH/s`}
-            subValue={latest_system?.expected_hashrate ? `Target: ${latest_system.expected_hashrate.toFixed(2)} GH/s` : null}
-            iconColor="text-blue-500"
+            label={isOfflineLike ? 'Hashrate (last known)' : 'Hashrate'}
+            value={formatHashrate(latest_mining.hashrate_ghs)}
+            subtitle={
+              latest_system?.expected_hashrate
+                ? `Target: ${formatHashrate(latest_system.expected_hashrate)}`
+                : undefined
+            }
           />
-          <QuickStat
+          <MetricCard
+            variant="inline"
             icon={Thermometer}
-            label="Temperature"
-            value={`${latest_hardware.temperature_c?.toFixed(1)}°C`}
-            subValue={`Fan: ${latest_hardware.fan_speed_rpm} RPM`}
-            status={tempStatus}
-            iconColor="text-red-500"
+            label={isOfflineLike ? 'Temperature (last known)' : 'Temperature'}
+            value={formatTemp(latest_hardware.temperature_c, 1)}
+            subtitle={
+              latest_hardware.fan_speed_rpm != null
+                ? `Fan: ${latest_hardware.fan_speed_rpm} RPM`
+                : undefined
+            }
+            tone={tempStatus === 'hot' ? 'danger' : tempStatus === 'warning' ? 'warning' : 'success'}
           />
-          <QuickStat
+          <MetricCard
+            variant="inline"
             icon={Zap}
-            label="Power"
-            value={`${latest_hardware.power_watts?.toFixed(1)}W`}
-            subValue={`Efficiency: ${latest_hardware.efficiency_j_per_th?.toFixed(1)} J/TH`}
-            iconColor="text-yellow-500"
+            label={isOfflineLike ? 'Power (last known)' : 'Power'}
+            value={formatPower(latest_hardware.power_watts, 1)}
+            subtitle={
+              latest_hardware.efficiency_j_per_th != null
+                ? `Efficiency: ${latest_hardware.efficiency_j_per_th?.toFixed(1)} J/TH`
+                : undefined
+            }
           />
-          <QuickStat
+          <MetricCard
+            variant="inline"
             icon={CheckCircle2}
-            label="Shares"
-            value={latest_mining.shares_accepted?.toLocaleString()}
-            subValue={`${latest_mining.shares_rejected} rejected • ${formatUptime(latest_mining.uptime_seconds)}`}
-            iconColor="text-green-500"
+            label="Best difficulty"
+            value={formatDifficulty(latest_mining.best_difficulty)}
+            subtitle={`${latest_mining.shares_accepted?.toLocaleString() || 0} accepted · ${formatUptime(latest_mining.uptime_seconds)}`}
+            tone={isOfflineLike ? 'muted' : 'success'}
           />
         </div>
       )}
@@ -346,23 +345,23 @@ export default function BitAxeDeviceDetails() {
       {/* PERFORMANCE SUMMARY BAR */}
       {/* ============================================ */}
       {latest_system && latest_mining && (
-        <Card className="bg-gradient-to-r from-muted/50 to-muted/30">
+        <Card className={`bg-gradient-to-r from-muted/50 to-muted/30 ${isOfflineLike ? 'opacity-80' : ''}`}>
           <CardContent className="py-3 sm:py-4">
             <div className="grid gap-4 sm:gap-6 grid-cols-3">
               <div className="text-center sm:text-left">
                 <p className="text-[10px] sm:text-xs text-muted-foreground mb-0.5 sm:mb-1">Performance</p>
                 <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 justify-center sm:justify-start">
                   <span className="text-lg sm:text-2xl font-bold">{efficiencyPercent}%</span>
-                  {parseFloat(efficiencyPercent) >= 95 && <Badge variant="default" className="text-[10px] sm:text-xs">Optimal</Badge>}
+                  {!isOfflineLike && parseFloat(efficiencyPercent) >= 95 && <Badge variant="default" className="text-[10px] sm:text-xs">Optimal</Badge>}
                 </div>
               </div>
               <div className="text-center">
                 <p className="text-[10px] sm:text-xs text-muted-foreground mb-0.5 sm:mb-1">Acceptance Rate</p>
-                <span className="text-lg sm:text-2xl font-bold text-green-500">{acceptanceRate}%</span>
+                <span className="text-lg sm:text-2xl font-bold text-status-online-fg">{acceptanceRate}%</span>
               </div>
               <div className="text-center sm:text-right">
                 <p className="text-[10px] sm:text-xs text-muted-foreground mb-0.5 sm:mb-1">Best Ever</p>
-                <span className="text-lg sm:text-2xl font-bold text-orange-500">{formatNumber(latest_mining.best_difficulty)}</span>
+                <span className="text-lg sm:text-2xl font-bold text-primary">{formatNumber(latest_mining.best_difficulty)}</span>
               </div>
             </div>
           </CardContent>
@@ -372,11 +371,11 @@ export default function BitAxeDeviceDetails() {
       {/* ============================================ */}
       {/* MAIN CONTENT TABS */}
       {/* ============================================ */}
-      <Tabs defaultValue="overview" className="space-y-4">
+      <Tabs defaultValue="performance" className="space-y-4">
         <TabsList className="w-full overflow-x-auto lg:w-auto lg:inline-grid lg:grid-cols-4">
-          <TabsTrigger value="overview" className="gap-1.5 sm:gap-2">
+          <TabsTrigger value="performance" className="gap-1.5 sm:gap-2">
             <Activity className="h-3.5 w-3.5 sm:h-4 sm:w-4 hidden sm:block" />
-            Overview
+            Performance
           </TabsTrigger>
           <TabsTrigger value="hardware" className="gap-1.5 sm:gap-2">
             <Cpu className="h-3.5 w-3.5 sm:h-4 sm:w-4 hidden sm:block" />
@@ -393,7 +392,7 @@ export default function BitAxeDeviceDetails() {
         </TabsList>
 
         {/* Overview Tab */}
-        <TabsContent value="overview" className="space-y-6">
+        <TabsContent value="performance" className="space-y-6">
           {/* Charts Row */}
           <div className="grid gap-4 lg:grid-cols-2">
             {/* Hashrate Trend */}
@@ -451,7 +450,7 @@ export default function BitAxeDeviceDetails() {
                   </ResponsiveContainer>
                 ) : (
                   <div className="flex items-center justify-center h-64 text-muted-foreground">
-                    No hashrate data available
+                    isOfflineLike ? 'No samples in this range (device offline)' : 'No hashrate data available'
                   </div>
                 )}
               </CardContent>
@@ -540,8 +539,8 @@ export default function BitAxeDeviceDetails() {
                 <CardContent className="space-y-0">
                   <InfoRow label="Pool URL" value={latest_mining.pool_url} mono />
                   <InfoRow label="Pool User" value={latest_mining.pool_user?.substring(0, 25) + '...'} mono />
-                  <InfoRow label="Best Ever" value={formatNumber(latest_mining.best_difficulty)} />
-                  <InfoRow label="Best Session" value={formatNumber(latest_mining.best_session_difficulty)} />
+                  <InfoRow label="Best Ever" value={formatDifficulty(latest_mining.best_difficulty)} />
+                  <InfoRow label="Best Session" value={formatDifficulty(latest_mining.best_session_difficulty)} />
                   <InfoRow label="Blocks Found" value={latest_mining.blocks_found?.toString()} />
                   <InfoRow label="Uptime" value={formatUptime(latest_mining.uptime_seconds)} />
                   <InfoRow label="Last Updated" value={formatDate(latest_mining.recorded_at)} />
@@ -848,7 +847,7 @@ export default function BitAxeDeviceDetails() {
                   <CardContent className="pt-4">
                     <div className="flex items-center gap-3">
                       <div className={`p-2 rounded-lg ${latest_system.is_using_fallback ? 'bg-red-500/20' : 'bg-emerald-500/20'}`}>
-                        <Network className={`h-5 w-5 ${latest_system.is_using_fallback ? 'text-red-400' : 'text-emerald-400'}`} />
+                        <Network className={`h-5 w-5 ${latest_system.is_using_fallback ? 'text-status-critical-fg' : 'text-status-online-fg'}`} />
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground">Pool Status</p>

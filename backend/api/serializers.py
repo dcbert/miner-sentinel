@@ -68,34 +68,6 @@ class DeviceWriteSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
 
-class BitaxeDeviceWriteSerializer(DeviceWriteSerializer):
-    """Shim create/update for /api/bitaxe/devices/ — forces make=bitaxe."""
-    # default so UniqueTogetherValidator does not reject missing make
-    make = serializers.CharField(required=False, default=Device.MAKE_BITAXE)
-
-    def create(self, validated_data):
-        validated_data['make'] = Device.MAKE_BITAXE
-        return super().create(validated_data)
-
-    def update(self, instance, validated_data):
-        validated_data['make'] = Device.MAKE_BITAXE
-        return super().update(instance, validated_data)
-
-
-class AvalonDeviceWriteSerializer(DeviceWriteSerializer):
-    """Shim create/update for /api/avalon/devices/ — forces make=avalon."""
-    make = serializers.CharField(required=False, default=Device.MAKE_AVALON)
-
-    def create(self, validated_data):
-        validated_data['make'] = Device.MAKE_AVALON
-        validated_data.setdefault('port', 4028)
-        return super().create(validated_data)
-
-    def update(self, instance, validated_data):
-        validated_data['make'] = Device.MAKE_AVALON
-        return super().update(instance, validated_data)
-
-
 class CollectorSettingsSerializer(serializers.ModelSerializer):
     """Serializer for data collector settings."""
     telegram_bot_token_configured = serializers.SerializerMethodField()

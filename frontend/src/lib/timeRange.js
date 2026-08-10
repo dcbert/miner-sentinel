@@ -335,10 +335,11 @@ export function getChartTimeAxisConfig(hours) {
     }
   }
 
-  // 30d / 90d / long custom
+  // 30d / 90d / long custom — wider gaps so ticks don't collapse to one day
   return {
     bucket: 'weeks',
-    minTickGap: 72,
+    minTickGap: 96,
+    // Let Recharts skip dense ticks; preserve ends so range is visible
     interval: 'preserveStartEnd',
     tick: (value) =>
       fmt(value, { month: 'short', day: 'numeric' }),

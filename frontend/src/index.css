@@ -43,6 +43,28 @@
     --sidebar-border: oklch(0.9276 0.0058 264.5313);
     --sidebar-ring: oklch(0.7686 0.1647 70.0804);
     --radius: 0.625rem;
+    /* Operational status (ops UI — not brand chrome) */
+    --status-online: oklch(0.62 0.17 145);
+    --status-online-fg: oklch(0.35 0.08 145);
+    --status-warning: oklch(0.78 0.15 85);
+    --status-warning-fg: oklch(0.42 0.1 70);
+    --status-critical: oklch(0.58 0.2 25);
+    --status-critical-fg: oklch(0.45 0.16 25);
+    --status-stale: oklch(0.6 0.04 260);
+    --status-stale-fg: oklch(0.45 0.03 260);
+    --status-unknown: oklch(0.7 0.02 260);
+    --status-unknown-fg: oklch(0.45 0.02 260);
+    --surface-sunken: oklch(0.975 0.002 260);
+    --surface-elevated: oklch(1 0 0);
+    --metric-hashrate: var(--chart-1);
+    --metric-power: var(--chart-2);
+    --metric-temp: var(--chart-3);
+    --metric-shares: var(--chart-4);
+    --make-1: oklch(0.55 0.14 250);
+    --make-2: oklch(0.55 0.16 300);
+    --make-3: oklch(0.55 0.12 180);
+    --make-4: oklch(0.55 0.12 40);
+    --make-neutral: oklch(0.55 0.02 260);
     --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
     --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -82,6 +104,27 @@
     --sidebar-border: oklch(0.3715 0 0);
     --sidebar-ring: oklch(0.7686 0.1647 70.0804);
     --radius: 0.625rem;
+    --status-online: oklch(0.72 0.17 145);
+    --status-online-fg: oklch(0.85 0.12 145);
+    --status-warning: oklch(0.82 0.14 90);
+    --status-warning-fg: oklch(0.9 0.1 90);
+    --status-critical: oklch(0.68 0.18 25);
+    --status-critical-fg: oklch(0.85 0.1 25);
+    --status-stale: oklch(0.65 0.03 260);
+    --status-stale-fg: oklch(0.78 0.02 260);
+    --status-unknown: oklch(0.55 0.02 260);
+    --status-unknown-fg: oklch(0.7 0.02 260);
+    --surface-sunken: oklch(0.22 0 0);
+    --surface-elevated: oklch(0.3 0 0);
+    --metric-hashrate: var(--chart-1);
+    --metric-power: var(--chart-2);
+    --metric-temp: var(--chart-3);
+    --metric-shares: var(--chart-4);
+    --make-1: oklch(0.7 0.12 250);
+    --make-2: oklch(0.72 0.12 300);
+    --make-3: oklch(0.7 0.1 180);
+    --make-4: oklch(0.72 0.1 50);
+    --make-neutral: oklch(0.7 0.02 260);
     --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
     --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
@@ -194,6 +237,25 @@
 
   .safe-right {
     padding-right: env(safe-area-inset-right);
+  }
+
+  /* Tabular metrics for scannable ops dashboards */
+  .tabular-metrics {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-pulse {
+    animation: none !important;
+  }
+  .animate-blob,
+  .gradient-avatar {
+    animation: none !important;
+  }
+  .login-button:hover,
+  .login-input:focus {
+    transform: none;
   }
 }
 

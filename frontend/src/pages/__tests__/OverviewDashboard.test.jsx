@@ -23,9 +23,14 @@ vi.mock('@/lib/api', () => ({
 const mockAnalytics = {
   overview: {
     active_devices: 2,
+    online_devices: 2,
+    enabled_devices: 2,
+    total_devices: 4,
+    offline_devices: 0,
+    inactive_devices: 2,
     bitaxe_devices: 1,
     avalon_devices: 1,
-    total_devices: 2,
+    devices_by_make: { bitaxe: 3, avalon: 1 },
   },
   mining: {
     current: {
@@ -100,11 +105,11 @@ describe('OverviewDashboard (smoke + global time range)', () => {
     localStorage.clear()
   })
 
-  it('renders header and loads analytics without local PeriodSelector', async () => {
+  it('renders metrics and loads analytics without local PeriodSelector', async () => {
     renderWithProviders(<OverviewDashboard />)
 
-    expect(await screen.findByText('Overview')).toBeInTheDocument()
-    expect(screen.getByText(/Live metrics now/i)).toBeInTheDocument()
+    // Page chrome title lives in Layout; Overview content starts with range caption
+    expect(await screen.findByText(/Live metrics now/i)).toBeInTheDocument()
     // Default global range is last 30 days
     expect(screen.queryAllByText(/last 30 days/i).length).toBeGreaterThan(0)
 
@@ -114,6 +119,7 @@ describe('OverviewDashboard (smoke + global time range)', () => {
 
     expect(screen.queryAllByText(/1.23 TH\/s/i).length).toBeGreaterThan(0)
     expect(screen.queryAllByText(/Best Share/i).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Updated/i)).toBeInTheDocument()
   })
 
   it('refetches analytics when stored time range is 7d', async () => {
@@ -123,7 +129,7 @@ describe('OverviewDashboard (smoke + global time range)', () => {
     )
     renderWithProviders(<OverviewDashboard />)
 
-    await screen.findByText('Overview')
+    await screen.findByText(/Live metrics now/i)
 
     await waitFor(() => {
       const calls = api.get.mock.calls.filter(([url]) => url.includes('/api/overview/analytics/'))
@@ -160,6 +166,7 @@ describe('OverviewDashboard (smoke + global time range)', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByText(/Unable to load analytics data/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Unable to load overview/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
   })
 })

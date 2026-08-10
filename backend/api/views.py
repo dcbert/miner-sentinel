@@ -20,20 +20,15 @@ from .models import (
     PoolStats,
 )
 from .serializers import (
-    BitaxeDeviceWriteSerializer,
     CollectorSettingsSerializer,
     DeviceSerializer,
     DeviceWriteSerializer,
 )
 from .unified_serializers import (
-    UnifiedDeviceAsAvalonSerializer,
-    UnifiedDeviceAsBitaxeSerializer,
     UnifiedHardwareSerializer,
-    UnifiedMiningAsAvalonSerializer,
-    UnifiedMiningAsBitaxeSerializer,
-    UnifiedPoolAsLegacySerializer,
-    UnifiedSystemAsAvalonSerializer,
-    UnifiedSystemAsBitaxeSerializer,
+    UnifiedMiningSerializer,
+    UnifiedPoolSerializer,
+    UnifiedSystemSerializer,
 )
 from .analytics_unified import detailed_analytics, overview_analytics
 from .time_window import MAX_DAYS as _MAX_DAYS
@@ -84,22 +79,13 @@ class DeviceViewSet(viewsets.ModelViewSet):
             .order_by('recorded_at')
         )
 
-        if device.make == Device.MAKE_AVALON:
-            device_data = UnifiedDeviceAsAvalonSerializer(device).data
-            mining_ser = UnifiedMiningAsAvalonSerializer
-            system_ser = UnifiedSystemAsAvalonSerializer
-        else:
-            device_data = UnifiedDeviceAsBitaxeSerializer(device).data
-            mining_ser = UnifiedMiningAsBitaxeSerializer
-            system_ser = UnifiedSystemAsBitaxeSerializer
-
         return Response({
-            'device': device_data,
+            'device': DeviceSerializer(device).data,
             'make': device.make,
-            'latest_mining': mining_ser(latest_mining).data if latest_mining else None,
+            'latest_mining': UnifiedMiningSerializer(latest_mining).data if latest_mining else None,
             'latest_hardware': UnifiedHardwareSerializer(latest_hardware).data if latest_hardware else None,
-            'latest_system': system_ser(latest_system).data if latest_system else None,
-            # Keep legacy key names for frontend compatibility
+            'latest_system': UnifiedSystemSerializer(latest_system).data if latest_system else None,
+            # Keep stable key names for frontend detail charts
             'hashrate_trend_24h': hashrate_trend,
             'temperature_trend_24h': temp_trend,
             'trend_hours': window.hours,
@@ -110,7 +96,7 @@ class DeviceViewSet(viewsets.ModelViewSet):
 
 class FleetMiningViewSet(viewsets.ReadOnlyModelViewSet):
     """All-device mining stats from unified tables."""
-    serializer_class = UnifiedMiningAsBitaxeSerializer
+    serializer_class = UnifiedMiningSerializer
 
     def get_queryset(self):
         qs = DeviceMiningStats.objects.all().select_related('device')
@@ -137,7 +123,7 @@ class FleetMiningViewSet(viewsets.ReadOnlyModelViewSet):
             latest = DeviceMiningStats.objects.filter(device=device).first()
             if not latest:
                 continue
-            data = UnifiedMiningAsBitaxeSerializer(latest).data
+            data = UnifiedMiningSerializer(latest).data
             data['device_type'] = device.make
             data['device_id_str'] = device.device_id
             data['device_name'] = device.name
@@ -200,179 +186,12 @@ def device_details_by_make_id(request, make, device_id):
     return view.details(request, pk=device.pk)
 
 
-class BitAxeDeviceViewSet(viewsets.ModelViewSet):
-    """
-    Legacy URL shim: Bitaxe device CRUD against unified Device (make=bitaxe).
-    """
-    lookup_field = 'device_id'
-
-    def get_queryset(self):
-        queryset = Device.objects.filter(make=Device.MAKE_BITAXE).order_by('name')
-        active_only = self.request.query_params.get('active_only', 'false').lower() == 'true'
-        if active_only:
-            queryset = queryset.filter(is_active=True)
-        return queryset
-
-    def get_serializer_class(self):
-        if self.action in ['create', 'update', 'partial_update']:
-            return BitaxeDeviceWriteSerializer
-        return UnifiedDeviceAsBitaxeSerializer
-
-
-class BitAxeMiningStatsViewSet(viewsets.ReadOnlyModelViewSet):
-    """Bitaxe mining statistics — reads unified device_mining_stats."""
-    serializer_class = UnifiedMiningAsBitaxeSerializer
-
-    def get_queryset(self):
-        queryset = DeviceMiningStats.objects.filter(
-            device__make=Device.MAKE_BITAXE
-        ).select_related('device')
-        device_id = self.request.query_params.get('device_id')
-        if device_id:
-            queryset = queryset.filter(device__device_id=device_id)
-        return queryset
-
-    @action(detail=False, methods=['get'])
-    def latest(self, request):
-        devices = Device.objects.filter(make=Device.MAKE_BITAXE, is_active=True)
-        results = []
-        for device in devices:
-            latest_stat = DeviceMiningStats.objects.filter(device=device).first()
-            if latest_stat:
-                results.append(self.get_serializer(latest_stat).data)
-        return Response(results)
-
-    @action(detail=False, methods=['get'])
-    def hashrate_trend(self, request):
-        device_id = request.query_params.get('device_id')
-        window = parse_time_window(request.query_params)
-        queryset = DeviceMiningStats.objects.filter(
-            device__make=Device.MAKE_BITAXE,
-            **window.as_filter(),
-        )
-        if device_id:
-            queryset = queryset.filter(device__device_id=device_id)
-        stats = queryset.values(
-            'device__name', 'recorded_at', 'hashrate_ghs',
-            'shares_accepted', 'shares_rejected',
-        ).order_by('recorded_at')
-        # Alias device__name → device__device_name for frontend compatibility
-        out = []
-        for row in stats:
-            out.append({
-                'device__device_name': row['device__name'],
-                'recorded_at': row['recorded_at'],
-                'hashrate_ghs': row['hashrate_ghs'],
-                'shares_accepted': row['shares_accepted'],
-                'shares_rejected': row['shares_rejected'],
-            })
-        return Response(out)
-
-
-class BitAxeHardwareLogViewSet(viewsets.ReadOnlyModelViewSet):
-    """Bitaxe hardware logs — reads unified device_hardware_stats."""
-    serializer_class = UnifiedHardwareSerializer
-
-    def get_queryset(self):
-        queryset = DeviceHardwareStats.objects.filter(
-            device__make=Device.MAKE_BITAXE
-        ).select_related('device')
-        device_id = self.request.query_params.get('device_id')
-        if device_id:
-            queryset = queryset.filter(device__device_id=device_id)
-        return queryset
-
-    @action(detail=False, methods=['get'])
-    def latest(self, request):
-        devices = Device.objects.filter(make=Device.MAKE_BITAXE, is_active=True)
-        results = []
-        for device in devices:
-            latest_log = DeviceHardwareStats.objects.filter(device=device).first()
-            if latest_log:
-                results.append(self.get_serializer(latest_log).data)
-        return Response(results)
-
-    @action(detail=False, methods=['get'])
-    def temperature_trend(self, request):
-        device_id = request.query_params.get('device_id')
-        window = parse_time_window(request.query_params)
-        queryset = DeviceHardwareStats.objects.filter(
-            device__make=Device.MAKE_BITAXE,
-            **window.as_filter(),
-        )
-        if device_id:
-            queryset = queryset.filter(device__device_id=device_id)
-        logs = queryset.values(
-            'device__name', 'recorded_at', 'temperature_c',
-            'power_watts', 'fan_speed_rpm',
-        ).order_by('recorded_at')
-        out = [
-            {
-                'device__device_name': row['device__name'],
-                'recorded_at': row['recorded_at'],
-                'temperature_c': row['temperature_c'],
-                'power_watts': row['power_watts'],
-                'fan_speed_rpm': row['fan_speed_rpm'],
-            }
-            for row in logs
-        ]
-        return Response(out)
-
-
-class BitAxeSystemInfoViewSet(viewsets.ReadOnlyModelViewSet):
-    """Bitaxe system info — reads unified device_system_info."""
-    serializer_class = UnifiedSystemAsBitaxeSerializer
-
-    def get_queryset(self):
-        queryset = DeviceSystemInfo.objects.filter(
-            device__make=Device.MAKE_BITAXE
-        ).select_related('device')
-        device_id = self.request.query_params.get('device_id')
-        if device_id:
-            queryset = queryset.filter(device__device_id=device_id)
-        return queryset
-
-    @action(detail=False, methods=['get'], url_path='device/(?P<device_id>[^/.]+)')
-    def device_details(self, request, device_id=None):
-        """Get complete device details including latest stats, hardware, and system info."""
-        try:
-            device = Device.objects.get(make=Device.MAKE_BITAXE, device_id=device_id)
-        except Device.DoesNotExist:
-            return Response({'detail': 'Device not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        latest_mining = DeviceMiningStats.objects.filter(device=device).first()
-        latest_hardware = DeviceHardwareStats.objects.filter(device=device).first()
-        latest_system = DeviceSystemInfo.objects.filter(device=device).first()
-
-        window = parse_time_window(request.query_params)
-        time_filter = window.as_filter()
-        hashrate_trend = DeviceMiningStats.objects.filter(
-            device=device, **time_filter
-        ).values('recorded_at', 'hashrate_ghs', 'shares_accepted', 'shares_rejected').order_by('recorded_at')
-
-        temp_trend = DeviceHardwareStats.objects.filter(
-            device=device, **time_filter
-        ).values('recorded_at', 'temperature_c', 'power_watts', 'fan_speed_rpm').order_by('recorded_at')
-
-        return Response({
-            'device': UnifiedDeviceAsBitaxeSerializer(device).data,
-            'latest_mining': UnifiedMiningAsBitaxeSerializer(latest_mining).data if latest_mining else None,
-            'latest_hardware': UnifiedHardwareSerializer(latest_hardware).data if latest_hardware else None,
-            'latest_system': UnifiedSystemAsBitaxeSerializer(latest_system).data if latest_system else None,
-            'hashrate_trend_24h': list(hashrate_trend),
-            'temperature_trend_24h': list(temp_trend),
-            'trend_hours': window.hours,
-            'window_start': window.start.isoformat(),
-            'window_end': window.end.isoformat(),
-        })
-
-
 class PoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    First-class pool statistics API (/api/pool/).
+    Pool statistics API (/api/pool/).
     Reads unified pool_stats; supports pool_type + pool_address filters.
     """
-    serializer_class = UnifiedPoolAsLegacySerializer
+    serializer_class = UnifiedPoolSerializer
 
     def get_queryset(self):
         queryset = PoolStats.objects.all()
@@ -472,12 +291,6 @@ class PoolStatsViewSet(viewsets.ReadOnlyModelViewSet):
         else:
             stats['total_shares'] = 0
         return Response(stats)
-
-
-class BitAxePoolStatsViewSet(PoolStatsViewSet):
-    """Legacy URL alias for /api/bitaxe/pool/ → same as /api/pool/."""
-    pass
-
 
 
 # Authentication Views

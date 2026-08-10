@@ -147,12 +147,10 @@ def utcnow() -> datetime:
 
 
 class DeviceDataWriter:
-    """Persist normalized device snapshots to unified tables (Release C: unified only)."""
+    """Persist normalized device snapshots to unified tables only."""
 
-    def __init__(self, database_url: str, dual_write: bool = False):
-        """dual_write is accepted for API compatibility but ignored (always False)."""
+    def __init__(self, database_url: str):
         self.database_url = database_url
-        self.dual_write = False
 
     def get_connection(self):
         return psycopg2.connect(self.database_url)
@@ -335,9 +333,9 @@ class DeviceDataWriter:
             conn.close()
 
 class PoolDataWriter:
-    """Persist normalized pool snapshots to pool_stats only (Release C)."""
+    """Persist normalized pool snapshots to pool_stats only."""
 
-    def __init__(self, database_url: str = None, dual_write: bool = False, connection=None):
+    def __init__(self, database_url: str = None, connection=None):
         """
         Prefer an existing ``connection`` (shared collector conn).
         ``database_url`` is only used when no connection is provided.
@@ -346,7 +344,6 @@ class PoolDataWriter:
         a URL from dsn alone — that causes auth failures on a second connect.
         """
         self.database_url = database_url
-        self.dual_write = False  # Release C: unified only
         self.connection = connection
 
     def get_connection(self):

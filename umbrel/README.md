@@ -27,10 +27,12 @@ Four services (plus Umbrel `app_proxy`):
 
 | Service | Image / role |
 |---------|----------------|
-| **db** | PostgreSQL 17 — persistent volume under `${APP_DATA_DIR}/data/db` |
+| **db** | PostgreSQL — persistent volume under `${APP_DATA_DIR}/data/db` |
 | **backend** | Django REST API (Gunicorn), migrations + superuser bootstrap |
 | **frontend** | React SPA via nginx |
-| **data-service** | Collectors for Bitaxe, Avalon, CKPool/Public Pool; Telegram/Discord alerts |
+| **data-service** | Multi-make collectors (Bitaxe, Avalon, NMAxe, NerdNOS, CKPool/Public Pool); Telegram/Discord alerts |
+
+On install/upgrade the backend runs `python manage.py migrate`, which applies the **unified device + pool schema** (and any data copy / legacy table drop migrations). All runtime reads and writes use the unified tables only.
 
 Services run under non-root conventions where the stack defines them (e.g. Postgres `user: "1000:1000"`).
 
@@ -82,7 +84,7 @@ image: dcbert/minersentinel-backend:v1.0.0@sha256:<digest>
 ### 3. Assets for the App Store
 
 - **Icon**: 256×256 SVG (no rounded corners — Umbrel applies rounding)
-- **Gallery**: 3–5 screenshots, typically 1440×900 PNG (repo screenshots live under `docs/images/`)
+- **Gallery**: 3–5 screenshots, typically 1440×900 PNG (repo screenshots live under [`docs/images/`](../docs/images/))
 
 ## Testing on Umbrel
 
@@ -120,10 +122,11 @@ umbreld client apps.install.mutate --appId miner-sentinel
 2. Log in with username **`admin`** and the password shown by Umbrel for this app (deterministic app password).
 3. The backend container bootstraps the Django superuser from `DJANGO_SUPERUSER_*` env (username `admin`, password `$APP_PASSWORD`).
 4. In **Settings**:
-   - Add Bitaxe and Avalon devices (IP addresses)
-   - Select CKPool or Public Pool and set your mining address
-   - Optionally enable **Telegram** and/or **Discord** webhooks
-   - Set energy rate/currency for cost analysis
+   - **Devices** — add miners (choose make: Bitaxe, Avalon, NMAxe, NerdNOS, … and IP)
+   - **Data Collector** — CKPool or Public Pool address/URL
+   - **Notifications** — optional Telegram and/or Discord
+   - **Appearance** — theme
+   - Energy rate/currency for cost analysis (collector / analytics settings)
 5. Django Admin (if needed) is available behind the same app proxy once authenticated, typically at `/admin/` on the app URL.
 
 If you must create a superuser manually:
@@ -150,7 +153,7 @@ CORS/CSRF trusted origins are set to the Umbrel domain on port 3080 (and Tailsca
 1. Fork [getumbrel/umbrel-apps](https://github.com/getumbrel/umbrel-apps)
 2. Branch: `git checkout -b add-miner-sentinel` (or update an existing `miner-sentinel` entry)
 3. Copy the contents of this `umbrel/` directory into `miner-sentinel/` in the fork
-4. Add `icon.svg` and gallery images
+4. Add `icon.svg` and gallery images (reuse or export from `docs/images/`)
 5. Open a PR using the store’s submission template
 
 ```markdown
@@ -176,5 +179,6 @@ See also the upstream submission reference in `umbrel-app.yml` (`submission` fie
 ## Related docs
 
 - Root project documentation: [../README.md](../README.md)
+- Unified schema plan: [../docs/plans/unified-device-schema.md](../docs/plans/unified-device-schema.md)
 - Local development compose: [../docker-compose.yml](../docker-compose.yml)
 - Production-style compose: [../docker-compose.prod.yml](../docker-compose.prod.yml)

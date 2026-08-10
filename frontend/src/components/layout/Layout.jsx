@@ -1,4 +1,5 @@
 import GlobalTimeRange from '@/components/layout/GlobalTimeRange'
+import { useTheme } from '@/components/theme-provider'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/lib/AuthContext'
 import { isTimeRangeRoute } from '@/lib/timeRange'
@@ -8,7 +9,9 @@ import {
   Home,
   LogOut,
   Menu,
+  Moon,
   Settings,
+  Sun,
   TrendingUp,
   X,
 } from 'lucide-react'
@@ -83,7 +86,7 @@ const PAGE_META = {
   },
   '/settings': {
     title: 'Settings',
-    description: 'Devices, pool, and notifications',
+    description: 'Devices, pool, notifications, and appearance',
   },
 }
 
@@ -94,9 +97,13 @@ function resolvePageMeta(pathname) {
     pathname.startsWith('/bitaxe/') ||
     pathname.startsWith('/avalon/')
   ) {
+    const parts = pathname.split('/').filter(Boolean)
+    // /devices/:make/:deviceId
+    const make = parts[0] === 'devices' ? parts[1] : parts[0]
     return {
       title: 'Device',
-      description: 'Hardware detail and trends',
+      description: make ? `${make} · hardware detail and trends` : 'Hardware detail and trends',
+      isDevice: true,
     }
   }
   for (const [path, meta] of Object.entries(PAGE_META)) {
@@ -113,6 +120,7 @@ export default function Layout({ children }) {
   const location = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const { user, logout } = useAuth()
+  const { theme, setTheme } = useTheme()
   const showTimeRange = isTimeRangeRoute(location.pathname)
   const page = resolvePageMeta(location.pathname)
 
@@ -120,6 +128,16 @@ export default function Layout({ children }) {
     logout()
     window.location.href = '/login'
   }
+
+  const cycleTheme = () => {
+    const order = ['dark', 'light', 'system']
+    const idx = order.indexOf(theme)
+    setTheme(order[(idx + 1) % order.length])
+  }
+
+  const ThemeIcon = theme === 'light' ? Sun : Moon
+  const themeLabel =
+    theme === 'system' ? 'Theme: system' : theme === 'light' ? 'Theme: light' : 'Theme: dark'
 
   const initials = (user?.username || 'U').slice(0, 2).toUpperCase()
 
@@ -221,7 +239,10 @@ export default function Layout({ children }) {
               {user?.username || 'User'}
             </p>
             {user?.email ? (
-              <p className="truncate text-[11px] leading-tight text-muted-foreground">
+              <p
+                className="truncate text-[11px] leading-tight text-muted-foreground"
+                title={user.email}
+              >
                 {user.email}
               </p>
             ) : (
@@ -233,12 +254,22 @@ export default function Layout({ children }) {
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+            className="h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground"
+            onClick={cycleTheme}
+            title={themeLabel}
+            aria-label={themeLabel}
+          >
+            <ThemeIcon className="h-4 w-4" strokeWidth={1.75} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground"
             onClick={handleLogout}
             title="Sign out"
             aria-label="Sign out"
           >
-            <LogOut className="h-3.5 w-3.5" strokeWidth={1.75} />
+            <LogOut className="h-4 w-4" strokeWidth={1.75} />
           </Button>
         </div>
       </div>
@@ -312,9 +343,16 @@ export default function Layout({ children }) {
         <header className="sticky top-0 z-30 hidden border-b border-border/80 bg-background/90 backdrop-blur-md md:block">
           <div className="flex h-14 items-center justify-between gap-6 px-6">
             <div className="min-w-0">
-              <h1 className="truncate text-sm font-semibold tracking-tight text-foreground">
-                {page.title}
-              </h1>
+              {/* Device detail pages own the H1 (device name); chrome uses a label. */}
+              {page.isDevice ? (
+                <p className="truncate text-sm font-semibold tracking-tight text-foreground">
+                  {page.title}
+                </p>
+              ) : (
+                <h1 className="truncate text-sm font-semibold tracking-tight text-foreground">
+                  {page.title}
+                </h1>
+              )}
               {page.description && (
                 <p className="truncate text-[12px] text-muted-foreground">
                   {page.description}

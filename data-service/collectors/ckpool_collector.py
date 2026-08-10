@@ -1,6 +1,6 @@
 """
 CKPool data collector for mining pool statistics.
-Fetches data from CKPool API, normalizes, dual-writes to pool_stats + legacy.
+Fetches data from CKPool API, normalizes, writes to pool_stats.
 """
 import logging
 import re
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class CKPoolCollector:
     """Collector for CKPool mining pool statistics."""
 
-    def __init__(self, db_connection, pool_url="https://eusolo.ckpool.org", pool_address=None, dual_write=False):
+    def __init__(self, db_connection, pool_url="https://eusolo.ckpool.org", pool_address=None):
         """
         Initialize CKPool collector.
 
@@ -24,12 +24,10 @@ class CKPoolCollector:
             db_connection: Open psycopg2 connection used for writes (preferred)
             pool_url: CKPool API base URL
             pool_address: Bitcoin address or pool username
-            dual_write: also write legacy bitaxe_pool_stats
         """
         self.db = db_connection
         self.pool_url = pool_url.rstrip('/')
         self.pool_address = pool_address
-        self.dual_write = dual_write
         logger.info(f"Initialized CKPool collector for address: {pool_address}")
 
     @retry(stop_max_attempt_number=3, wait_exponential_multiplier=1000, wait_exponential_max=10000)
@@ -144,7 +142,7 @@ class CKPoolCollector:
             return 0
 
     def store_pool_stats(self, stats_data):
-        """Store pool statistics via PoolDataWriter (unified + optional legacy)."""
+        """Store pool statistics via PoolDataWriter (unified pool_stats only)."""
         if not stats_data:
             logger.warning("No stats data to store")
             return
@@ -152,7 +150,7 @@ class CKPoolCollector:
         try:
             snapshot = self.normalize_stats(stats_data)
             # Reuse the open collector connection — never rebuild DSN (password is stripped)
-            writer = PoolDataWriter(connection=self.db, dual_write=self.dual_write)
+            writer = PoolDataWriter(connection=self.db)
             writer.write_snapshot(snapshot)
             logger.info(
                 f"Stored pool stats: {stats_data.get('hashrate1m', 'N/A')} "

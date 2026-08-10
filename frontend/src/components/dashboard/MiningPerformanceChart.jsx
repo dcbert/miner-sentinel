@@ -65,11 +65,11 @@ export default function MiningPerformanceChart({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="flex flex-col">
-                    <span className="text-[0.70rem] uppercase text-muted-foreground">Hashrate</span>
+                    <span className="text-[0.70rem] uppercase text-muted-foreground">Hashrate (left)</span>
                     <span className="font-bold text-primary">{formatHashrate(payload[0]?.value || 0)}</span>
                   </div>
                   <div className="flex flex-col">
-                    <span className="text-[0.70rem] uppercase text-muted-foreground">Shares</span>
+                    <span className="text-[0.70rem] uppercase text-muted-foreground">Shares (right)</span>
                     <span className="font-bold text-chart-2">{formatShares(payload[1]?.value || 0)}</span>
                   </div>
                 </div>
@@ -81,14 +81,14 @@ export default function MiningPerformanceChart({
       />
       <Legend
         content={() => (
-          <div className="flex justify-center gap-4 mt-4">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-primary"></div>
-              <span className="text-xs text-muted-foreground">Hashrate</span>
+          <div className="mt-2 flex justify-center gap-5">
+            <div className="flex items-center gap-1.5">
+              <div className="h-2.5 w-2.5 rounded-full bg-primary" />
+              <span className="text-[11px] text-muted-foreground">Hashrate (left)</span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-chart-2"></div>
-              <span className="text-xs text-muted-foreground">Shares</span>
+            <div className="flex items-center gap-1.5">
+              <div className="h-2.5 w-2.5 rounded-full bg-chart-2" />
+              <span className="text-[11px] text-muted-foreground">Shares (right)</span>
             </div>
           </div>
         )}

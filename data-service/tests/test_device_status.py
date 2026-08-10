@@ -34,7 +34,7 @@ class TestWasDeviceOnline:
 
 class TestBitaxeStatusTransitions:
     def setup_method(self):
-        self.collector = BitAxeCollector('postgresql://u:p@localhost/db', dual_write=False)
+        self.collector = BitAxeCollector('postgresql://u:p@localhost/db')
         self.collector.telegram_notifier = MagicMock()
         self.collector.discord_notifier = MagicMock()
         self.collector.writer = MagicMock()
@@ -92,7 +92,7 @@ class TestBitaxeStatusTransitions:
 
 class TestAvalonStatusTransitions:
     def setup_method(self):
-        self.collector = AvalonCollector('postgresql://u:p@localhost/db', dual_write=False)
+        self.collector = AvalonCollector('postgresql://u:p@localhost/db')
         self.collector.telegram_notifier = MagicMock()
         self.collector.discord_notifier = MagicMock()
         self.collector.writer = MagicMock()

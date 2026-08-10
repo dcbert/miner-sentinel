@@ -23,7 +23,7 @@ const mockDevices = [
     name: 'Bitaxe-1',
     make: 'bitaxe',
     is_active: true,
-    last_seen_at: '2026-07-23T12:00:00Z',
+    last_seen_at: new Date().toISOString(),
     error_message: null,
   },
   {
@@ -33,7 +33,7 @@ const mockDevices = [
     name: 'Avalon-1',
     make: 'avalon',
     is_active: true,
-    last_seen_at: '2026-07-23T12:00:00Z',
+    last_seen_at: new Date().toISOString(),
     error_message: null,
   },
 ]
@@ -106,13 +106,6 @@ function buildMock(overrides = {}) {
       return Promise.resolve({
         data: overrides.hardwareStats !== undefined ? overrides.hardwareStats : mockHardwareLatest,
       })
-    }
-    // Legacy fallbacks (should not be required)
-    if (url.includes('/api/bitaxe/devices/')) {
-      return Promise.resolve({ data: { results: [] } })
-    }
-    if (url.includes('/api/avalon/devices/')) {
-      return Promise.resolve({ data: [] })
     }
     return Promise.resolve({ data: {} })
   }

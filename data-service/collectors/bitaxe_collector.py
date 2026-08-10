@@ -1,8 +1,8 @@
 """
 Bitaxe device collector
 
-Fetches AxeOS HTTP API data, normalizes to canonical units, dual-writes
-via DeviceDataWriter (unified tables only).
+Fetches AxeOS HTTP API data, normalizes to canonical units, writes via
+DeviceDataWriter (unified tables only).
 """
 
 import logging
@@ -32,13 +32,13 @@ class BitAxeCollector:
 
     MAKE = 'bitaxe'
 
-    def __init__(self, database_url, dual_write=False):
+    def __init__(self, database_url):
         self.database_url = database_url
         self.devices = []  # Will be populated from database
         self.telegram_notifier = TelegramNotifier()
         self.discord_notifier = DiscordNotifier()
         self.notification_rules = NotificationRules()
-        self.writer = DeviceDataWriter(database_url, dual_write=dual_write)
+        self.writer = DeviceDataWriter(database_url)
 
     def update_telegram_settings(self, enabled, bot_token, chat_id):
         """Update telegram notification settings."""

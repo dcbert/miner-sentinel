@@ -17,7 +17,21 @@ function AppRoutes() {
   const { isAuthenticated, isLoading, login } = useAuth()
 
   if (isLoading) {
-    return <div className="flex items-center justify-center h-screen">Loading...</div>
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-border/80 bg-card shadow-sm">
+          <img
+            src="/logo.svg"
+            alt=""
+            width={32}
+            height={32}
+            className="h-8 w-8 rounded-md object-cover"
+            draggable={false}
+          />
+        </div>
+        <p className="text-sm text-muted-foreground">Loading MinerSentinel…</p>
+      </div>
+    )
   }
 
   if (!isAuthenticated) {

@@ -1,3 +1,6 @@
+import ErrorState from '@/components/feedback/ErrorState'
+import DataFreshness from '@/components/metrics/DataFreshness'
+import SectionHeader from '@/components/layout/SectionHeader'
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -465,7 +468,7 @@ function DeviceComparisonTable({ devices }) {
       </CardHeader>
       <CardContent className="px-2 sm:px-6">
         <div className="overflow-x-auto -mx-2 sm:mx-0">
-          <Table className="min-w-[700px]">
+          <Table className="min-w-[560px] sm:min-w-[700px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Device</TableHead>
@@ -530,9 +533,33 @@ function BestSharesHistoryChart({ dailyBests, rangeLabel, rangeHours = 24 * 30 }
   // Format data for chart — keep raw date for adaptive axis labels
   const chartData = dailyBests.map(item => ({
     date: item.date,
-    bestEver: item.best_difficulty || 0,           // All-time best difficulty
-    bestSession: item.best_session_difficulty || 0, // Session best difficulty
+    bestEver: item.best_difficulty || 0,
+    bestSession: item.best_session_difficulty || 0,
   }))
+  const nonZeroPoints = chartData.filter(
+    (d) => (d.bestEver || 0) > 0 || (d.bestSession || 0) > 0,
+  ).length
+
+  if (nonZeroPoints === 0) {
+    return (
+      <Card className="col-span-full">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+            <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5" />
+            Best Shares History{rangeLabel ? ` (${rangeLabel})` : ''}
+          </CardTitle>
+          <CardDescription className="text-xs sm:text-sm">
+            Daily best shares: All-Time Best vs Session Best
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No best-share samples in this range yet.
+          </p>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Card className="col-span-full">
@@ -545,17 +572,18 @@ function BestSharesHistoryChart({ dailyBests, rangeLabel, rangeHours = 24 * 30 }
         </CardTitle>
         <CardDescription className="text-xs sm:text-sm">
           Daily best shares: All-Time Best vs Session Best
+          {nonZeroPoints < 3 ? ' · sparse data in this window' : ''}
         </CardDescription>
       </CardHeader>
       <CardContent className="px-2 sm:px-6">
         {/* Legend */}
-        <div className="flex flex-wrap gap-4 mb-4 text-xs sm:text-sm">
+        <div className="mb-4 flex flex-wrap gap-4 text-xs sm:text-sm">
           <div className="flex items-center gap-2">
-            <div className="w-4 h-0.5 bg-primary"></div>
+            <div className="h-0.5 w-4 bg-primary"></div>
             <span className="text-muted-foreground">Best Ever (All-Time)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-0.5 bg-orange-500"></div>
+            <div className="h-0.5 w-4 bg-primary/60"></div>
             <span className="text-muted-foreground">Best Session</span>
           </div>
         </div>
@@ -668,7 +696,7 @@ function TopSharesTable({ topShares }) {
       </CardHeader>
       <CardContent className="px-2 sm:px-6">
         <div className="overflow-x-auto -mx-2 sm:mx-0">
-        <Table className="min-w-[400px]">
+        <Table className="min-w-[320px] sm:min-w-[400px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-10 sm:w-12">#</TableHead>
@@ -1182,6 +1210,7 @@ export default function AnalyticsDashboard() {
   const [analytics, setAnalytics] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [updatedAt, setUpdatedAt] = useState(null)
 
   useEffect(() => {
     // Refresh network data (BTC price, hashrate) when visiting analytics page
@@ -1206,6 +1235,7 @@ export default function AnalyticsDashboard() {
         params: toAnalyticsParams(range),
       })
       setAnalytics(response.data)
+      setUpdatedAt(new Date())
       setError(null)
     } catch (err) {
       console.error('Error fetching analytics:', err)
@@ -1221,12 +1251,15 @@ export default function AnalyticsDashboard() {
 
   if (error || !analytics) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center space-y-4">
-          <AlertTriangle className="h-12 w-12 mx-auto text-destructive" />
-          <p className="text-muted-foreground">{error || 'Unable to load analytics'}</p>
-        </div>
-      </div>
+      <ErrorState
+        title="Unable to load analytics"
+        description={error || 'Could not load analytics data. Check that the API is running and try again.'}
+        onRetry={() => {
+          setLoading(true)
+          fetchAnalytics()
+        }}
+        className="h-96"
+      />
     )
   }
 
@@ -1241,17 +1274,18 @@ export default function AnalyticsDashboard() {
   const totalHashrateGhs = prediction.current_hashrate_ghs || 0
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl sm:text-3xl font-bold">Analytics Dashboard</h1>
-        <p className="text-sm sm:text-base text-muted-foreground">
-          Insights & predictions · period analysis for{' '}
-          <span className="text-foreground/80 font-medium">{range.label.toLowerCase()}</span>
-        </p>
-        <p className="text-[10px] sm:text-xs text-muted-foreground/80 mt-0.5">
-          {formatRangeWindow(range)}
-        </p>
+    <div className="space-y-6 sm:space-y-8">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs text-muted-foreground sm:text-sm">
+            Insights & predictions · period analysis for{' '}
+            <span className="font-medium text-foreground/80">{range.label.toLowerCase()}</span>
+          </p>
+          <p className="mt-0.5 text-[10px] text-muted-foreground/80 sm:text-xs">
+            {formatRangeWindow(range)}
+          </p>
+        </div>
+        <DataFreshness updatedAt={updatedAt} />
       </div>
 
       <Tabs defaultValue="predictions" className="space-y-4 sm:space-y-6">
@@ -1263,8 +1297,13 @@ export default function AnalyticsDashboard() {
           <TabsTrigger value="devices">Devices</TabsTrigger>
         </TabsList>
 
-        {/* PREDICTIONS TAB */}
+        {/* PREDICTIONS — solo mining outlook */}
         <TabsContent value="predictions" className="space-y-4 sm:space-y-6">
+          <SectionHeader
+            title="Solo mining outlook"
+            description="Statistical best-share predictions for the selected range"
+            className="mb-1"
+          />
           <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
             <PredictionCard prediction={prediction} />
             <TopSharesTable topShares={topShares} />
@@ -1274,6 +1313,10 @@ export default function AnalyticsDashboard() {
 
         {/* SOLO MINING TAB */}
         <TabsContent value="solo" className="space-y-4 sm:space-y-6">
+          <SectionHeader
+            title="Block odds"
+            description="Illustrative solo-mining probabilities from current hashrate"
+          />
           <SoloMiningStats
             totalHashrateGhs={totalHashrateGhs}
             bestDifficulty={prediction.all_time_best_difficulty}
@@ -1283,6 +1326,10 @@ export default function AnalyticsDashboard() {
 
         {/* ENERGY TAB */}
         <TabsContent value="energy" className="space-y-4 sm:space-y-6">
+          <SectionHeader
+            title="Energy & hardware"
+            description="Power draw, temperature trends, and efficiency"
+          />
           <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
             <EnergyAnalysisCard energy={energy} />
             <PowerTrendChart powerTrend={energy.power_trend} rangeHours={range.hours} />
@@ -1292,6 +1339,10 @@ export default function AnalyticsDashboard() {
 
         {/* COSTS TAB */}
         <TabsContent value="costs" className="space-y-4 sm:space-y-6">
+          <SectionHeader
+            title="Energy & cost"
+            description="Electricity cost and optional revenue estimates"
+          />
           <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
             <CostAnalysisCard cost={cost} />
 

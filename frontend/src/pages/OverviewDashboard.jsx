@@ -1,158 +1,108 @@
-import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import api from '@/lib/api';
+/**
+ * Overview — balanced layout:
+ * KPIs → equal charts → equal Devices/Health/Pool strip → period stats
+ */
 import {
-    Activity,
-    AlertTriangle,
-    Award,
-    Battery,
-    CheckCircle2,
-    Cpu,
-    Flame,
-    Hash,
-    Server,
-    TrendingDown,
-    TrendingUp,
-    Zap
-} from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { useTimeRange } from '@/lib/TimeRangeContext';
-import { formatRangeWindow, toAnalyticsParams } from '@/lib/timeRange';
-
-// Import dashboard components
+  DashboardSkeleton,
+  HardwareHealthChart,
+  MiningPerformanceChart,
+  formatAxisHashrate,
+  formatAxisPower,
+  formatAxisShares,
+  formatHashrate,
+  formatNumber,
+  formatShares,
+  getBestShare,
+} from '@/components/dashboard'
+import MakeBadge from '@/components/devices/MakeBadge'
+import EmptyState from '@/components/feedback/EmptyState'
+import ErrorState from '@/components/feedback/ErrorState'
+import DataFreshness from '@/components/metrics/DataFreshness'
+import HealthBar from '@/components/metrics/HealthBar'
+import MetricCard from '@/components/metrics/MetricCard'
+import StatusIndicator from '@/components/status/StatusIndicator'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import api from '@/lib/api'
+import { makeLabel } from '@/lib/devices'
+import { useTimeRange } from '@/lib/TimeRangeContext'
+import { formatRangeWindow, toAnalyticsParams } from '@/lib/timeRange'
 import {
-    DashboardSkeleton,
-    HardwareHealthChart,
-    MiningPerformanceChart,
-    formatAxisHashrate,
-    formatAxisPower,
-    formatAxisShares,
-    formatHashrate,
-    formatNumber,
-    formatShares,
-    getBestShare
-} from '@/components/dashboard';
-
-// ============================================
-// HELPER COMPONENTS
-// ============================================
-
-// Status indicator dot with animation
-function StatusDot({ status = 'online' }) {
-  const colors = {
-    online: 'bg-green-500',
-    warning: 'bg-yellow-500',
-    offline: 'bg-red-500',
-  }
-  return (
-    <span className="relative flex h-2.5 w-2.5">
-      <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${colors[status]}`}></span>
-      <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${colors[status]}`}></span>
-    </span>
-  )
-}
-
-// Hero metric card for the main KPIs
-function HeroMetric({
-  icon: Icon,
-  label,
-  value,
-  subValue,
-  trend,
-  trendValue,
-  iconColor = 'text-primary',
-  tooltip
-}) {
-  const TrendIcon = trend === 'up' ? TrendingUp : trend === 'down' ? TrendingDown : null
-  const trendColor = trend === 'up' ? 'text-green-500' : trend === 'down' ? 'text-red-500' : 'text-muted-foreground'
-
-  return (
-    <div className="flex items-start gap-3 sm:gap-4 p-3 sm:p-4 rounded-xl bg-card border hover:shadow-lg transition-shadow">
-      <div className={`p-2 sm:p-3 rounded-lg bg-muted ${iconColor}`}>
-        <Icon className="h-5 w-5 sm:h-6 sm:w-6" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-xs sm:text-sm text-muted-foreground font-medium">{label}</p>
-        <p className="text-lg sm:text-2xl font-bold tracking-tight truncate">{value}</p>
-        <div className="flex flex-wrap items-center gap-1 sm:gap-2 mt-0.5">
-          {subValue && <span className="text-[10px] sm:text-xs text-muted-foreground">{subValue}</span>}
-          {TrendIcon && trendValue && (
-            <span className={`flex items-center text-[10px] sm:text-xs font-medium ${trendColor}`}>
-              <TrendIcon className="h-3 w-3 mr-0.5" />
-              {trendValue}
-            </span>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// Quick health indicator
-function HealthIndicator({ label, value, max, unit = '', status = 'normal', icon: Icon }) {
-  const percentage = Math.min((value / max) * 100, 100)
-  const statusColors = {
-    normal: 'bg-green-500',
-    warning: 'bg-yellow-500',
-    danger: 'bg-red-500',
-  }
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between text-sm">
-        <div className="flex items-center gap-1.5">
-          {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground" />}
-          <span className="text-muted-foreground">{label}</span>
-        </div>
-        <span className="font-medium">{formatNumber(value, 1)}{unit}</span>
-      </div>
-      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all ${statusColors[status]}`}
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
-    </div>
-  )
-}
+  Activity,
+  Award,
+  Battery,
+  CheckCircle2,
+  Cpu,
+  Flame,
+  Hash,
+  Server,
+  Zap,
+} from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 
 export default function OverviewDashboard() {
   const { range } = useTimeRange()
+  const navigate = useNavigate()
   const [analytics, setAnalytics] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [updatedAt, setUpdatedAt] = useState(null)
 
-  useEffect(() => {
-    fetchAnalytics()
-    const interval = setInterval(fetchAnalytics, 120000)
-    return () => clearInterval(interval)
-    // Re-fetch when global time range changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [range.key, range.from?.getTime?.(), range.to?.getTime?.(), range.hours, range.days])
-
-  const fetchAnalytics = async () => {
+  const fetchAnalytics = useCallback(async () => {
     try {
+      setError(null)
       const response = await api.get('/api/overview/analytics/', {
         params: toAnalyticsParams(range),
       })
       setAnalytics(response.data)
-    } catch (error) {
-      console.error('Error fetching analytics:', error)
+      setUpdatedAt(new Date())
+    } catch (err) {
+      console.error('Error fetching analytics:', err)
+      setError(err)
+      if (!analytics) setAnalytics(null)
     } finally {
       setLoading(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keep last good data on refresh fail
+  }, [range.key, range.from?.getTime?.(), range.to?.getTime?.(), range.hours, range.days])
+
+  useEffect(() => {
+    setLoading(true)
+    fetchAnalytics()
+    const interval = setInterval(fetchAnalytics, 120000)
+    return () => clearInterval(interval)
+  }, [fetchAnalytics])
+
+  if (loading && !analytics) {
+    return <DashboardSkeleton />
   }
 
-  if (loading) {
-    return <DashboardSkeleton />
+  if (error && !analytics) {
+    return (
+      <ErrorState
+        title="Unable to load overview"
+        description="Could not load analytics data. Check that the API is running and try again."
+        onRetry={() => {
+          setLoading(true)
+          fetchAnalytics()
+        }}
+        className="h-96"
+      />
+    )
   }
 
   if (!analytics) {
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center space-y-4">
-          <AlertTriangle className="h-12 w-12 mx-auto text-destructive" />
-          <p className="text-muted-foreground">Unable to load analytics data</p>
-        </div>
-      </div>
+      <ErrorState
+        title="Unable to load overview"
+        description="No analytics data returned."
+        onRetry={() => {
+          setLoading(true)
+          fetchAnalytics()
+        }}
+        className="h-96"
+      />
     )
   }
 
@@ -160,8 +110,8 @@ export default function OverviewDashboard() {
   const hardware = analytics.hardware || {}
   const pool = analytics.pool || {}
   const trends = analytics.trends || {}
+  const overview = analytics.overview || {}
 
-  // Add defaults for nested objects
   mining.current = mining.current || {}
   mining.period = mining.period || {}
   mining.efficiency = mining.efficiency || {}
@@ -173,7 +123,6 @@ export default function OverviewDashboard() {
   trends.hourly_hashrate = trends.hourly_hashrate || []
   trends.hourly_hardware = trends.hourly_hardware || []
 
-  // Calculate derived values
   const totalHashrate = mining.current.total_hashrate_ghs || 0
   const acceptanceRate = mining.current.acceptance_rate || 0
   const totalPower = hardware.current.total_power_watts || 0
@@ -183,258 +132,367 @@ export default function OverviewDashboard() {
   const dailyEnergy = (totalPower / 1000) * 24
   const tempStatus = avgTemp > 70 ? 'danger' : avgTemp > 60 ? 'warning' : 'normal'
 
+  const onlineDevices = overview.online_devices ?? overview.active_devices ?? 0
+  const totalDevices =
+    overview.total_devices ??
+    overview.enabled_devices ??
+    (overview.bitaxe_devices || 0) +
+      (overview.avalon_devices || 0) +
+      (overview.nmaxe_devices || 0) +
+      (overview.nerdnos_devices || 0)
+  const offlineCount =
+    overview.offline_devices ?? Math.max(0, (overview.enabled_devices ?? totalDevices) - onlineDevices)
+  const inactiveCount = overview.inactive_devices ?? 0
+
+  // Prefer devices_by_make (all registered); fall back to per-make enabled counts
+  let makeCounts = []
+  if (overview.devices_by_make && typeof overview.devices_by_make === 'object') {
+    makeCounts = Object.entries(overview.devices_by_make)
+      .filter(([, val]) => Number(val) > 0)
+      .map(([make, count]) => ({ make, count: Number(count) }))
+      .sort((a, b) => b.count - a.count)
+  } else {
+    makeCounts = Object.entries(overview)
+      .filter(
+        ([key, val]) =>
+          key.endsWith('_devices') &&
+          !['active_devices', 'total_devices', 'online_devices', 'enabled_devices', 'offline_devices', 'inactive_devices'].includes(key) &&
+          Number(val) > 0,
+      )
+      .map(([key, val]) => ({
+        make: key.replace(/_devices$/, ''),
+        count: Number(val),
+      }))
+  }
+
+  const fleetStatus =
+    totalDevices === 0
+      ? 'unknown'
+      : onlineDevices === 0
+        ? 'offline'
+        : offlineCount > 0 || inactiveCount > 0
+          ? 'warning'
+          : 'online'
+
+  const acceptanceTrend =
+    acceptanceRate > 99
+      ? { direction: 'up', label: 'Excellent' }
+      : acceptanceRate > 95
+        ? { direction: 'flat', label: 'Good' }
+        : { direction: 'down', label: 'Needs attention' }
+
+  if (totalDevices === 0) {
+    return (
+      <div className="space-y-4 sm:space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground sm:text-sm">
+            Live metrics · charts for{' '}
+            <span className="font-medium text-foreground/80">{range.label.toLowerCase()}</span>
+          </p>
+          <DataFreshness updatedAt={updatedAt} live />
+        </div>
+        <EmptyState
+          icon={Server}
+          title="No devices yet"
+          description="Add a Bitaxe, Avalon, or other supported miner to start monitoring your fleet."
+          action={{ label: 'Add device', to: '/settings' }}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4 sm:space-y-6">
-      {/* ============================================ */}
-      {/* HEADER - Clean and minimal */}
-      {/* ============================================ */}
-      <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:items-end">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-primary/10">
-            <Activity className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Overview</h1>
-            <p className="text-xs sm:text-sm text-muted-foreground">
-              Live metrics now · charts & period stats for{' '}
-              <span className="text-foreground/80 font-medium">{range.label.toLowerCase()}</span>
-            </p>
-            <p className="text-[10px] text-muted-foreground/80 mt-0.5 hidden sm:block">
-              {formatRangeWindow(range)}
-            </p>
-          </div>
+      {/* Toolbar — chrome already shows page title */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs text-muted-foreground sm:text-sm">
+            Live metrics now · charts & period stats for{' '}
+            <span className="font-medium text-foreground/80">{range.label.toLowerCase()}</span>
+          </p>
+          <p className="mt-0.5 hidden text-[10px] text-muted-foreground/80 sm:block">
+            {formatRangeWindow(range)}
+          </p>
         </div>
+        <DataFreshness updatedAt={updatedAt} live />
       </div>
 
-      {/* ============================================ */}
-      {/* HERO KPIs - 4 most important metrics */}
-      {/* ============================================ */}
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-        <HeroMetric
+      {/* Hero KPIs — equal weight row */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
+        <MetricCard
+          variant="hero"
+          layout="icon-left"
           icon={Hash}
           label="Total Hashrate"
           value={formatHashrate(totalHashrate)}
-          subValue={`${formatNumber(totalHashrate, 2)} GH/s`}
-          trend={stabilityScore > 90 ? 'up' : stabilityScore > 70 ? null : 'down'}
-          trendValue={`${formatNumber(stabilityScore, 0)}% stable`}
-          iconColor="text-blue-500"
-          tooltip="Combined hashrate from all active mining devices"
+          subtitle={`${formatNumber(totalHashrate, 2)} GH/s · fleet sum`}
+          tone="default"
         />
-
-        <HeroMetric
+        <MetricCard
+          variant="hero"
+          layout="icon-left"
           icon={CheckCircle2}
           label="Acceptance Rate"
           value={`${formatNumber(acceptanceRate, 1)}%`}
-          subValue={`${formatShares(mining.current.total_shares_accepted || 0)} accepted`}
-          trend={acceptanceRate > 99 ? 'up' : acceptanceRate > 95 ? null : 'down'}
-          trendValue={acceptanceRate > 99 ? 'Excellent' : acceptanceRate > 95 ? 'Good' : 'Needs attention'}
-          iconColor="text-green-500"
-          tooltip="Percentage of submitted shares accepted by the pool"
+          subtitle={`${formatShares(mining.current.total_shares_accepted || 0)} accepted`}
+          trend={acceptanceTrend}
+          tone={acceptanceRate > 95 ? 'success' : 'warning'}
         />
-
-        <HeroMetric
+        <MetricCard
+          variant="hero"
+          layout="icon-left"
           icon={Award}
           label="Best Share"
           value={getBestShare(mining, pool)}
-          subValue="All-time best difficulty"
-          iconColor="text-orange-500"
-          tooltip="Highest difficulty share ever found by your devices"
+          subtitle="All-time best difficulty"
+          tone="default"
         />
-
-        <HeroMetric
+        <MetricCard
+          variant="hero"
+          layout="icon-left"
           icon={Zap}
           label="Power Usage"
           value={`${formatNumber(totalPower, 0)}W`}
-          subValue={`${formatNumber(dailyEnergy, 1)} kWh/day`}
-          trend={efficiency > 0.5 ? 'up' : null}
-          trendValue={`${formatNumber(efficiency, 2)} GH/W`}
-          iconColor="text-yellow-500"
-          tooltip="Total power consumption across all devices"
+          subtitle={`${formatNumber(dailyEnergy, 1)} kWh/day · ${formatNumber(efficiency, 2)} GH/W`}
+          tone="default"
         />
       </div>
 
-      {/* ============================================ */}
-      {/* MAIN CONTENT GRID - 3 column layout */}
-      {/* ============================================ */}
-      <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-3">
-
-        {/* LEFT COLUMN - Device Status & Hardware Health */}
-        <div className="space-y-3 sm:space-y-4">
-          {/* Device Status Card */}
-          <Card>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base font-semibold flex items-center gap-2">
-                  <Server className="h-4 w-4 text-muted-foreground" />
-                  Devices
-                </CardTitle>
-                <StatusDot status={analytics.overview?.active_devices > 0 ? 'online' : 'offline'} />
+      {/* Charts — equal 50/50 so the page isn’t left-light / right-heavy */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-6">
+        <Card className="flex flex-col">
+          <CardHeader className="pb-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <CardTitle className="text-base font-semibold">Hashrate Performance</CardTitle>
+                <CardDescription>
+                  Fleet hashrate & shares · {range.label.toLowerCase()}
+                </CardDescription>
               </div>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-baseline gap-2 mb-4">
-                <span className="text-4xl font-bold">{analytics.overview?.active_devices || 0}</span>
-                <span className="text-sm text-muted-foreground">online</span>
+              <Badge variant="secondary" className="shrink-0 font-mono tabular-metrics">
+                {formatHashrate(totalHashrate)}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="flex-1 pt-0">
+            <div className="h-[220px] sm:h-[260px]">
+              <MiningPerformanceChart
+                data={trends.hourly_hashrate}
+                rangeHours={range.hours}
+                formatAxisHashrate={formatAxisHashrate}
+                formatAxisShares={formatAxisShares}
+                formatHashrate={formatHashrate}
+                formatShares={formatShares}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="flex flex-col">
+          <CardHeader className="pb-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <CardTitle className="text-base font-semibold">Temperature & Power</CardTitle>
+                <CardDescription>Hardware monitoring · {range.label.toLowerCase()}</CardDescription>
               </div>
-              <div className="space-y-2">
-                {(analytics.overview?.bitaxe_devices || 0) > 0 && (
-                  <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-blue-500" />
-                      <span>Bitaxe</span>
-                    </div>
-                    <span className="font-medium">{analytics.overview?.bitaxe_devices}</span>
-                  </div>
-                )}
-                {(analytics.overview?.avalon_devices || 0) > 0 && (
-                  <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-purple-500" />
-                      <span>Avalon</span>
-                    </div>
-                    <span className="font-medium">{analytics.overview?.avalon_devices}</span>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Hardware Health Card */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base font-semibold flex items-center gap-2">
-                <Cpu className="h-4 w-4 text-muted-foreground" />
-                Hardware Health
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <HealthIndicator
-                label="Temperature"
-                value={avgTemp}
-                max={80}
-                unit="°C"
-                status={tempStatus}
-                icon={Flame}
-              />
-              <HealthIndicator
-                label="Power"
-                value={totalPower}
-                max={Math.max(totalPower * 1.2, 500)}
-                unit="W"
-                status="normal"
-                icon={Battery}
-              />
-              <HealthIndicator
-                label="Stability"
-                value={stabilityScore}
-                max={100}
-                unit="%"
-                status={stabilityScore > 85 ? 'normal' : stabilityScore > 70 ? 'warning' : 'danger'}
-                icon={Activity}
-              />
-            </CardContent>
-          </Card>
-
-          {/* Pool Quick Stats */}
-          {pool.current && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base font-semibold">Pool Stats</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="text-center p-3 rounded-lg bg-muted/50">
-                    <p className="text-xs text-muted-foreground mb-1">1 Hour</p>
-                    <p className="text-sm font-bold">{pool.current.hashrate_1hr || '—'}</p>
-                  </div>
-                  <div className="text-center p-3 rounded-lg bg-muted/50">
-                    <p className="text-xs text-muted-foreground mb-1">24 Hours</p>
-                    <p className="text-sm font-bold">{pool.current.hashrate_1d || '—'}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-
-        {/* CENTER COLUMN - Main Charts (spans 2 columns on lg) */}
-        <div className="lg:col-span-2 space-y-3 sm:space-y-4">
-          {/* Hashrate Trend Chart */}
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-base font-semibold">Hashrate Performance</CardTitle>
-                  <CardDescription>Mining output over {range.label.toLowerCase()}</CardDescription>
-                </div>
-                <Badge variant="secondary" className="font-mono">
-                  {formatHashrate(totalHashrate)}
+              <div className="flex shrink-0 items-center gap-2">
+                <Badge
+                  variant={
+                    tempStatus === 'normal'
+                      ? 'secondary'
+                      : tempStatus === 'warning'
+                        ? 'outline'
+                        : 'destructive'
+                  }
+                  className="tabular-metrics"
+                >
+                  {formatNumber(avgTemp, 0)}°C
+                </Badge>
+                <Badge variant="secondary" className="tabular-metrics">
+                  {formatNumber(totalPower, 0)}W
                 </Badge>
               </div>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[200px]">
-                <MiningPerformanceChart
-                  data={trends.hourly_hashrate}
-                  rangeHours={range.hours}
-                  formatAxisHashrate={formatAxisHashrate}
-                  formatAxisShares={formatAxisShares}
-                  formatHashrate={formatHashrate}
-                  formatShares={formatShares}
-                />
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+          </CardHeader>
+          <CardContent className="flex-1 pt-0">
+            <div className="h-[220px] sm:h-[260px]">
+              <HardwareHealthChart
+                data={trends.hourly_hardware}
+                rangeHours={range.hours}
+                formatAxisPower={formatAxisPower}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
-          {/* Temperature & Power Chart */}
-          <Card>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-base font-semibold">Temperature & Power</CardTitle>
-                  <CardDescription>Hardware monitoring</CardDescription>
+      {/* Secondary strip — three equal cards for fleet / health / pool */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3 md:gap-6">
+        <Card
+          className="cursor-pointer transition-shadow hover:shadow-md"
+          onClick={() => navigate('/mining')}
+          role="link"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              navigate('/mining')
+            }
+          }}
+        >
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 text-base font-semibold">
+                <Server className="h-4 w-4 text-muted-foreground" strokeWidth={1.75} />
+                Devices
+              </CardTitle>
+              <StatusIndicator status={fleetStatus} size="md" showLabel={false} />
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-bold tabular-metrics sm:text-4xl">{onlineDevices}</span>
+              <span className="text-sm text-muted-foreground">/ {totalDevices} online</span>
+            </div>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+              {offlineCount > 0 && (
+                <span className="font-medium text-status-warning-fg">{offlineCount} offline</span>
+              )}
+              {inactiveCount > 0 && (
+                <span className="text-muted-foreground">{inactiveCount} inactive</span>
+              )}
+              {offlineCount === 0 && inactiveCount === 0 && (
+                <span className="text-status-online-fg">All enabled devices online</span>
+              )}
+            </div>
+            <div className="space-y-1.5 border-t border-border/60 pt-3">
+              {makeCounts.map(({ make, count }) => (
+                <div key={make} className="flex items-center justify-between text-sm">
+                  <MakeBadge make={make} />
+                  <span className="font-medium tabular-metrics">{count}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant={tempStatus === 'normal' ? 'secondary' : tempStatus === 'warning' ? 'outline' : 'destructive'}>
-                    {formatNumber(avgTemp, 0)}°C
-                  </Badge>
-                  <Badge variant="secondary">
-                    {formatNumber(totalPower, 0)}W
-                  </Badge>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="h-[200px]">
-                <HardwareHealthChart
-                  data={trends.hourly_hardware}
-                  rangeHours={range.hours}
-                  formatAxisPower={formatAxisPower}
-                />
-              </div>
-            </CardContent>
-          </Card>
+              ))}
+              {makeCounts.length === 0 && (
+                <p className="text-sm text-muted-foreground">{makeLabel('other')} fleet</p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
-          {/* Quick Stats Grid */}
-          <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:grid-cols-4">
-            <Card className="p-3 sm:p-4">
-              <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Shares/Hour</p>
-              <p className="text-lg sm:text-xl font-bold">{formatShares(mining.efficiency?.shares_per_hour || 0)}</p>
-            </Card>
-            <Card className="p-3 sm:p-4">
-              <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Peak Hashrate</p>
-              <p className="text-lg sm:text-xl font-bold">{formatHashrate(mining.period?.max_hashrate_ghs || 0)}</p>
-            </Card>
-            <Card className="p-3 sm:p-4">
-              <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Avg Temp</p>
-              <p className="text-lg sm:text-xl font-bold">{formatNumber(hardware.period?.avg_temperature_c || 0, 1)}°C</p>
-            </Card>
-            <Card className="p-3 sm:p-4">
-              <p className="text-[10px] sm:text-xs text-muted-foreground mb-1">Efficiency</p>
-              <p className="text-lg sm:text-xl font-bold">{formatNumber(efficiency, 2)} GH/W</p>
-            </Card>
-          </div>
-        </div>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base font-semibold">
+              <Cpu className="h-4 w-4 text-muted-foreground" strokeWidth={1.75} />
+              Hardware Health
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3.5">
+            <HealthBar
+              label="Temperature"
+              value={avgTemp}
+              max={80}
+              unit="°C"
+              thresholds={{ warning: 60, danger: 70 }}
+              icon={Flame}
+            />
+            <HealthBar
+              label="Power"
+              value={totalPower}
+              max={Math.max(totalPower * 1.2, 500)}
+              unit="W"
+              thresholds={{ warning: 1e9, danger: 1e9 }}
+              icon={Battery}
+              decimals={0}
+            />
+            <HealthBar
+              label="Period consistency"
+              value={stabilityScore}
+              max={100}
+              unit="%"
+              thresholds={{ warning: 70, danger: 40 }}
+              invert
+              icon={Activity}
+              decimals={0}
+            />
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              Consistency scores how steady fleet hashrate was over {range.label.toLowerCase()} (not live health).
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base font-semibold">
+              <Hash className="h-4 w-4 text-muted-foreground" strokeWidth={1.75} />
+              Pool
+            </CardTitle>
+            <CardDescription className="text-xs">Pool-reported hashrate windows</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {pool.current ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-lg bg-muted/50 p-3 text-center sm:p-4">
+                  <p className="mb-1 text-xs text-muted-foreground">1 Hour</p>
+                  <p className="text-base font-bold tabular-metrics sm:text-lg">
+                    {pool.current.hashrate_1hr || '—'}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-muted/50 p-3 text-center sm:p-4">
+                  <p className="mb-1 text-xs text-muted-foreground">24 Hours</p>
+                  <p className="text-base font-bold tabular-metrics sm:text-lg">
+                    {pool.current.hashrate_1d || '—'}
+                  </p>
+                </div>
+                {(pool.current.hashrate_5m || pool.current.hashrate_7d) && (
+                  <>
+                    <div className="rounded-lg bg-muted/40 p-3 text-center">
+                      <p className="mb-1 text-xs text-muted-foreground">5 Min</p>
+                      <p className="text-sm font-semibold tabular-metrics">
+                        {pool.current.hashrate_5m || '—'}
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-muted/40 p-3 text-center">
+                      <p className="mb-1 text-xs text-muted-foreground">7 Days</p>
+                      <p className="text-sm font-semibold tabular-metrics">
+                        {pool.current.hashrate_7d || '—'}
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <p className="py-6 text-center text-sm text-muted-foreground">No pool sample yet</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Period micro-stats — full width footer row */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+        <Card className="p-3 sm:p-4">
+          <p className="mb-1 text-[10px] text-muted-foreground sm:text-xs">Shares/Hour</p>
+          <p className="text-lg font-bold tabular-metrics sm:text-xl">
+            {formatShares(mining.efficiency?.shares_per_hour || 0)}
+          </p>
+        </Card>
+        <Card className="p-3 sm:p-4">
+          <p className="mb-1 text-[10px] text-muted-foreground sm:text-xs">Peak Hashrate</p>
+          <p className="text-lg font-bold tabular-metrics sm:text-xl">
+            {formatHashrate(mining.period?.max_hashrate_ghs || 0)}
+          </p>
+        </Card>
+        <Card className="p-3 sm:p-4">
+          <p className="mb-1 text-[10px] text-muted-foreground sm:text-xs">Avg Temp</p>
+          <p className="text-lg font-bold tabular-metrics sm:text-xl">
+            {formatNumber(hardware.period?.avg_temperature_c || 0, 1)}°C
+          </p>
+        </Card>
+        <Card className="p-3 sm:p-4">
+          <p className="mb-1 text-[10px] text-muted-foreground sm:text-xs">Efficiency</p>
+          <p className="text-lg font-bold tabular-metrics sm:text-xl">
+            {formatNumber(efficiency, 2)} GH/W
+          </p>
+        </Card>
       </div>
     </div>
   )

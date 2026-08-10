@@ -1,3 +1,5 @@
+import MakeBadge from '@/components/devices/MakeBadge'
+import StatusIndicator from '@/components/status/StatusIndicator'
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -17,9 +19,18 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import NotificationsSettings from '@/components/settings/NotificationsSettings';
+import NotificationsSettings from '@/components/settings/NotificationsSettings'
+import { useTheme } from '@/components/theme-provider'
 import api from '@/lib/api';
-import { makeLabel, SUPPORTED_MAKES, unwrapList } from '@/lib/devices';
+import {
+  deviceStatusLabel,
+  getDeviceStatus,
+  isDeviceOnline,
+  makeLabel,
+  SUPPORTED_MAKES,
+  unwrapList,
+} from '@/lib/devices'
+import { formatRelativeTime } from '@/lib/formatters'
 import {
   AlertCircle,
   Bell,
@@ -31,7 +42,10 @@ import {
   Plus,
   RefreshCw,
   Server,
+  Monitor,
+  Moon,
   Settings as SettingsIcon,
+  Sun,
   Trash2,
   Wifi,
   WifiOff
@@ -82,6 +96,10 @@ export default function SettingsPage() {
   })
   const [collectorStatus, setCollectorStatus] = useState(null)
   const [savingSettings, setSavingSettings] = useState(false)
+  const [collectorDirty, setCollectorDirty] = useState(false)
+  const [settingsTab, setSettingsTab] = useState('devices')
+  const [pendingTab, setPendingTab] = useState(null)
+  const { theme, setTheme } = useTheme()
 
 
   // Delete confirmation
@@ -106,6 +124,7 @@ export default function SettingsPage() {
 
       if (collectorRes.data) {
         setCollectorStatus(collectorRes.data)
+        setCollectorDirty(false)
         setCollectorSettings({
           polling_interval_minutes: collectorRes.data.polling_interval_minutes || 15,
           device_check_interval_minutes: collectorRes.data.device_check_interval_minutes || 5,
@@ -133,6 +152,19 @@ export default function SettingsPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const updateCollectorSettings = (next) => {
+    setCollectorSettings(next)
+    setCollectorDirty(true)
+  }
+
+  const requestTabChange = (next) => {
+    if (collectorDirty && (settingsTab === 'collector' || settingsTab === 'notifications') && next !== settingsTab) {
+      setPendingTab(next)
+      return
+    }
+    setSettingsTab(next)
   }
 
   const openAddDialog = () => {
@@ -226,6 +258,7 @@ export default function SettingsPage() {
 
       const res = await api.post('/api/settings/collector/', payload)
       setSuccess(res.data?.message || 'Settings saved successfully')
+      setCollectorDirty(false)
       // Refresh so notification_rules merges + configured flags update
       await fetchData()
       setTimeout(() => setSuccess(null), 3000)
@@ -267,93 +300,127 @@ export default function SettingsPage() {
     return date.toLocaleDateString()
   }
 
-  const DeviceTable = ({ devices: rows }) => (
-    <div className="overflow-x-auto sm:mx-0">
-      <Table className="min-w-[700px]">
-        <TableHeader>
-          <TableRow>
-            <TableHead>Device Name</TableHead>
-            <TableHead>Make</TableHead>
-            <TableHead className="hidden sm:table-cell">Device ID</TableHead>
-            <TableHead>IP Address</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="hidden sm:table-cell">Last Seen</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                No devices configured. Click &quot;Add Device&quot; to get started.
-              </TableCell>
-            </TableRow>
-          ) : (
-            rows.map((device) => (
-              <TableRow key={`${device.make}-${device.device_id}`}>
-                <TableCell className="font-medium">
-                  <div>
-                    {device.device_name}
-                    <span className="block sm:hidden text-xs text-muted-foreground font-mono mt-0.5">
-                      {device.device_id}
-                    </span>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline">{makeLabel(device.make)}</Badge>
-                </TableCell>
-                <TableCell className="font-mono text-sm hidden sm:table-cell">{device.device_id}</TableCell>
-                <TableCell className="font-mono text-xs sm:text-sm">{device.ip_address}</TableCell>
-                <TableCell>
-                {device.is_active ? (
-                  device.last_seen_at && new Date(device.last_seen_at) > new Date(Date.now() - 5 * 60 * 1000) ? (
-                    <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">
-                      <Wifi className="w-3 h-3 mr-1" />
-                      Online
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="bg-yellow-500/10 text-yellow-500 border-yellow-500/20">
-                      <Clock className="w-3 h-3 mr-1" />
-                      Pending
-                    </Badge>
-                  )
-                ) : (
-                  <Badge variant="outline" className="bg-gray-500/10 text-gray-500 border-gray-500/20">
-                    <WifiOff className="w-3 h-3 mr-1" />
-                    Inactive
-                  </Badge>
-                )}
-              </TableCell>
-              <TableCell className="text-muted-foreground hidden sm:table-cell">
-                {formatLastSeen(device.last_seen_at)}
-              </TableCell>
-              <TableCell className="text-right">
-                <div className="flex gap-1 sm:gap-2 justify-end">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => openEditDialog(device)}
-                  >
-                    <Edit className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-destructive hover:text-destructive"
-                    onClick={() => openDeleteDialog(device)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+  const DeviceTable = ({ devices: rows }) => {
+    if (rows.length === 0) {
+      return (
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          No devices configured. Click &quot;Add Device&quot; to get started.
+        </p>
+      )
+    }
+
+    const statusUi = (device) => {
+      const st = getDeviceStatus(device)
+      const dot =
+        st === 'online' ? 'online' : st === 'stale' ? 'stale' : st === 'inactive' ? 'unknown' : 'offline'
+      return <StatusIndicator status={dot} showLabel label={deviceStatusLabel(st)} />
+    }
+
+    return (
+      <>
+        {/* Mobile cards */}
+        <div className="space-y-3 md:hidden">
+          {rows.map((device) => (
+            <div
+              key={`${device.make}-${device.device_id}`}
+              className="rounded-lg border border-border/80 p-3"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-medium truncate">{device.device_name}</p>
+                  <p className="mt-0.5 font-mono text-xs text-muted-foreground truncate">
+                    {device.device_id} · {device.ip_address}
+                  </p>
                 </div>
-              </TableCell>
-            </TableRow>
-          ))
-        )}
-      </TableBody>
-    </Table>
-    </div>
-  )
+                <MakeBadge make={device.make} />
+              </div>
+              <div className="mt-2 flex items-center justify-between gap-2">
+                {statusUi(device)}
+                <span className="text-xs text-muted-foreground">
+                  {formatRelativeTime(device.last_seen_at) || 'Never'}
+                </span>
+              </div>
+              <div className="mt-3 flex justify-end gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9"
+                  onClick={() => openEditDialog(device)}
+                  aria-label={`Edit ${device.device_name}`}
+                >
+                  <Edit className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 text-destructive hover:text-destructive"
+                  onClick={() => openDeleteDialog(device)}
+                  aria-label={`Delete ${device.device_name}`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Desktop table */}
+        <div className="hidden overflow-x-auto md:block">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Device Name</TableHead>
+                <TableHead>Make</TableHead>
+                <TableHead>Device ID</TableHead>
+                <TableHead>IP Address</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Last Seen</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((device) => (
+                <TableRow key={`${device.make}-${device.device_id}`}>
+                  <TableCell className="font-medium">{device.device_name}</TableCell>
+                  <TableCell>
+                    <MakeBadge make={device.make} />
+                  </TableCell>
+                  <TableCell className="font-mono text-sm">{device.device_id}</TableCell>
+                  <TableCell className="font-mono text-sm">{device.ip_address}</TableCell>
+                  <TableCell>{statusUi(device)}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatRelativeTime(device.last_seen_at) || 'Never'}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
+                        onClick={() => openEditDialog(device)}
+                        aria-label={`Edit ${device.device_name}`}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 text-destructive hover:text-destructive"
+                        onClick={() => openDeleteDialog(device)}
+                        aria-label={`Delete ${device.device_name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </>
+    )
+  }
 
   if (loading) {
     return (
@@ -370,18 +437,16 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-hidden">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <SettingsIcon className="h-6 w-6 sm:h-8 sm:w-8" />
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold">Settings</h1>
-            <p className="text-sm text-muted-foreground">Manage devices and data collection</p>
-          </div>
-        </div>
+    <div className="space-y-4 overflow-hidden sm:space-y-6">
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+        <p className="text-xs text-muted-foreground sm:text-sm">
+          Devices, collector, pool, notifications, and appearance
+          {collectorDirty && (
+            <span className="ml-2 font-medium text-status-warning-fg">· Unsaved changes</span>
+          )}
+        </p>
         <Button variant="outline" onClick={fetchData} className="w-full sm:w-auto">
-          <RefreshCw className="h-4 w-4 mr-2" />
+          <RefreshCw className="mr-2 h-4 w-4" />
           Refresh
         </Button>
       </div>
@@ -400,8 +465,8 @@ export default function SettingsPage() {
         </Alert>
       )}
 
-      <Tabs defaultValue="devices" className="space-y-6">
-        <TabsList className="w-full overflow-x-auto sm:w-auto">
+      <Tabs value={settingsTab} onValueChange={requestTabChange} className="space-y-6">
+        <TabsList className="flex h-auto w-full flex-nowrap justify-start gap-0.5 overflow-x-auto sm:w-auto">
           <TabsTrigger value="devices">
             <Cpu className="h-4 w-4 mr-2" />
             Devices
@@ -413,6 +478,10 @@ export default function SettingsPage() {
           <TabsTrigger value="notifications">
             <Bell className="h-4 w-4 mr-2" />
             Notifications
+          </TabsTrigger>
+          <TabsTrigger value="appearance">
+            <Sun className="h-4 w-4 mr-2" />
+            Appearance
           </TabsTrigger>
         </TabsList>
 
@@ -452,7 +521,7 @@ export default function SettingsPage() {
                 Monitor and configure the data collection service
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4 sm:space-y-6 overflow-x-auto">
+            <CardContent className="max-w-2xl space-y-4 overflow-x-auto sm:space-y-6">
               {/* Status badges */}
               <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-4 min-w-0 max-w-full">
                 <div className="flex items-center gap-2">
@@ -491,7 +560,7 @@ export default function SettingsPage() {
                     className="w-full"
                     value={collectorSettings.polling_interval_minutes}
                     onChange={(e) =>
-                      setCollectorSettings({
+                      updateCollectorSettings({
                         ...collectorSettings,
                         polling_interval_minutes: parseInt(e.target.value) || 15,
                       })
@@ -512,7 +581,7 @@ export default function SettingsPage() {
                     className="w-full"
                     value={collectorSettings.device_check_interval_minutes}
                     onChange={(e) =>
-                      setCollectorSettings({
+                      updateCollectorSettings({
                         ...collectorSettings,
                         device_check_interval_minutes: parseInt(e.target.value) || 5,
                       })
@@ -530,7 +599,7 @@ export default function SettingsPage() {
                     id="pool_type"
                     value={collectorSettings.pool_type}
                     onValueChange={(value) =>
-                      setCollectorSettings({
+                      updateCollectorSettings({
                         ...collectorSettings,
                         pool_type: value,
                       })
@@ -557,7 +626,7 @@ export default function SettingsPage() {
                       placeholder="bc1q..."
                       value={collectorSettings.ckpool_address}
                       onChange={(e) =>
-                        setCollectorSettings({
+                        updateCollectorSettings({
                           ...collectorSettings,
                           ckpool_address: e.target.value,
                         })
@@ -579,12 +648,12 @@ export default function SettingsPage() {
                       }
                       onValueChange={(value) => {
                         if (value === 'custom') {
-                          setCollectorSettings({
+                          updateCollectorSettings({
                             ...collectorSettings,
                             ckpool_url: '',
                           })
                         } else {
-                          setCollectorSettings({
+                          updateCollectorSettings({
                             ...collectorSettings,
                             ckpool_url: value,
                           })
@@ -612,7 +681,7 @@ export default function SettingsPage() {
                         placeholder="https://your-ckpool-instance.com"
                         value={collectorSettings.ckpool_url}
                         onChange={(e) =>
-                          setCollectorSettings({
+                          updateCollectorSettings({
                             ...collectorSettings,
                             ckpool_url: e.target.value,
                           })
@@ -638,7 +707,7 @@ export default function SettingsPage() {
                       placeholder="bc1q..."
                       value={collectorSettings.publicpool_address}
                       onChange={(e) =>
-                        setCollectorSettings({
+                        updateCollectorSettings({
                           ...collectorSettings,
                           publicpool_address: e.target.value,
                         })
@@ -658,7 +727,7 @@ export default function SettingsPage() {
                       placeholder="http://localhost:3334"
                       value={collectorSettings.publicpool_url}
                       onChange={(e) =>
-                        setCollectorSettings({
+                        updateCollectorSettings({
                           ...collectorSettings,
                           publicpool_url: e.target.value,
                         })
@@ -690,7 +759,7 @@ export default function SettingsPage() {
                         placeholder="0.12"
                         value={collectorSettings.energy_rate}
                         onChange={(e) =>
-                          setCollectorSettings({
+                          updateCollectorSettings({
                             ...collectorSettings,
                             energy_rate: parseFloat(e.target.value) || 0,
                           })
@@ -700,7 +769,7 @@ export default function SettingsPage() {
                       <Select
                         value={collectorSettings.energy_currency}
                         onValueChange={(value) =>
-                          setCollectorSettings({
+                          updateCollectorSettings({
                             ...collectorSettings,
                             energy_currency: value,
                           })
@@ -730,7 +799,7 @@ export default function SettingsPage() {
                     id="show_revenue_stats"
                     checked={collectorSettings.show_revenue_stats}
                     onCheckedChange={(checked) =>
-                      setCollectorSettings({
+                      updateCollectorSettings({
                         ...collectorSettings,
                         show_revenue_stats: checked,
                       })
@@ -765,12 +834,81 @@ export default function SettingsPage() {
         <TabsContent value="notifications" className="space-y-6">
           <NotificationsSettings
             settings={collectorSettings}
-            setSettings={setCollectorSettings}
+            setSettings={(s) => {
+              setCollectorSettings((prev) => (typeof s === 'function' ? s(prev) : s))
+              setCollectorDirty(true)
+            }}
             onSave={handleSaveCollectorSettings}
             saving={savingSettings}
           />
         </TabsContent>
+
+        <TabsContent value="appearance" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base sm:text-lg">Theme</CardTitle>
+              <CardDescription className="text-xs sm:text-sm">
+                Choose light, dark, or match the system preference
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="max-w-md space-y-3">
+              {[
+                { value: 'light', label: 'Light', icon: Sun },
+                { value: 'dark', label: 'Dark', icon: Moon },
+                { value: 'system', label: 'System', icon: Monitor },
+              ].map((opt) => {
+                const Icon = opt.icon
+                const active = theme === opt.value
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setTheme(opt.value)}
+                    className={
+                      'flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ' +
+                      (active
+                        ? 'border-primary bg-accent/50 text-foreground'
+                        : 'border-border hover:bg-muted/50 text-muted-foreground')
+                    }
+                  >
+                    <Icon className="h-4 w-4" strokeWidth={1.75} />
+                    <span className="font-medium">{opt.label}</span>
+                    {active && <span className="ml-auto text-xs text-primary">Active</span>}
+                  </button>
+                )
+              })}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
       </Tabs>
+
+      {/* Unsaved changes guard */}
+      <Dialog open={!!pendingTab} onOpenChange={(open) => { if (!open) setPendingTab(null) }}>
+        <DialogContent onClose={() => setPendingTab(null)}>
+          <DialogHeader>
+            <DialogTitle>Unsaved changes</DialogTitle>
+            <DialogDescription>
+              You have unsaved collector or notification settings. Leave without saving?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingTab(null)}>Stay</Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setCollectorDirty(false)
+                setSettingsTab(pendingTab)
+                setPendingTab(null)
+                fetchData()
+              }}
+            >
+              Discard
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 
       {/* Add/Edit Device Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

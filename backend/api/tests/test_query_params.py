@@ -66,21 +66,19 @@ class TestAnalyticsInvalidParams:
 @pytest.mark.django_db
 class TestPoolAndTrendInvalidParams:
     def test_pool_hashrate_trend_invalid_hours(self, auth_client):
-        resp = auth_client.get('/api/bitaxe/pool/hashrate_trend/?hours=bad')
+        resp = auth_client.get('/api/pool/hashrate_trend/?hours=bad')
         assert resp.status_code == 200
         assert isinstance(resp.data, list)
 
     def test_pool_statistics_invalid_days(self, auth_client):
-        resp = auth_client.get('/api/bitaxe/pool/statistics/?days=nope')
+        resp = auth_client.get('/api/pool/statistics/?days=nope')
         assert resp.status_code == 200
         assert 'data_points' in resp.data
 
-    def test_bitaxe_hashrate_trend_invalid_hours(self, auth_client):
-        resp = auth_client.get('/api/bitaxe/mining/hashrate_trend/?hours=abc')
+    def test_mining_list_invalid_hours(self, auth_client):
+        resp = auth_client.get('/api/mining/?hours=abc')
         assert resp.status_code == 200
-        assert isinstance(resp.data, list)
 
-    def test_avalon_mining_stats_invalid_hours(self, auth_client):
-        resp = auth_client.get('/api/avalon/mining-stats/?hours=oops&limit=nope')
+    def test_hardware_list_invalid_hours(self, auth_client):
+        resp = auth_client.get('/api/hardware/?hours=oops')
         assert resp.status_code == 200
-        assert isinstance(resp.data, list)

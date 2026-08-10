@@ -1,6 +1,6 @@
 """
 PublicPool data collector for mining pool statistics.
-Fetches data from Public Pool API, normalizes, dual-writes to pool_stats + legacy.
+Fetches data from Public Pool API, normalizes, writes to pool_stats.
 
 API Endpoints used:
 - GET /api/client/:address - Get client info (workers, hashrate, bestDifficulty)
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class PublicPoolCollector:
     """Collector for Public Pool mining statistics."""
 
-    def __init__(self, db_connection, pool_url="http://localhost:3334", pool_address=None, dual_write=False):
+    def __init__(self, db_connection, pool_url="http://localhost:3334", pool_address=None):
         """
         Initialize PublicPool collector.
 
@@ -27,7 +27,6 @@ class PublicPoolCollector:
             db_connection: Database connection object
             pool_url: PublicPool API base URL (e.g., http://localhost:3334 or https://web.public-pool.io/api)
             pool_address: Bitcoin address for user statistics
-            dual_write: also write legacy bitaxe_pool_stats
         """
         self.db = db_connection
         # Ensure URL ends with /api if not already
@@ -35,7 +34,6 @@ class PublicPoolCollector:
         if not self.pool_url.endswith('/api'):
             self.pool_url = f"{self.pool_url}/api"
         self.pool_address = pool_address
-        self.dual_write = dual_write
         logger.info(f"Initialized PublicPool collector for address: {pool_address} at {self.pool_url}")
 
     @retry(stop_max_attempt_number=3, wait_exponential_multiplier=1000, wait_exponential_max=10000)
@@ -192,7 +190,7 @@ class PublicPoolCollector:
         )
 
     def store_pool_stats(self, client_data, pool_data=None):
-        """Store pool statistics via PoolDataWriter (unified + optional legacy)."""
+        """Store pool statistics via PoolDataWriter (unified pool_stats only)."""
         if not client_data:
             logger.warning("No client data to store")
             return
@@ -200,7 +198,7 @@ class PublicPoolCollector:
         try:
             snapshot = self.normalize_stats(client_data, pool_data)
             # Reuse open collector connection (dsn omits password — never rebuild URL from it)
-            writer = PoolDataWriter(connection=self.db, dual_write=self.dual_write)
+            writer = PoolDataWriter(connection=self.db)
             writer.write_snapshot(snapshot)
             logger.info(
                 f"Stored PublicPool stats: {snapshot.hashrate_1m_display} "

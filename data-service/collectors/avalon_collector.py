@@ -2,7 +2,7 @@
 Avalon Nano 3s device collector
 Uses TCP socket-based cgminer API (port 4028) as documented by Canaan.
 
-Normalizes to canonical units and dual-writes via DeviceDataWriter.
+Normalizes to canonical units and writes via DeviceDataWriter (unified tables only).
 """
 
 import json
@@ -34,13 +34,13 @@ class AvalonCollector:
 
     MAKE = 'avalon'
 
-    def __init__(self, database_url, dual_write=False):
+    def __init__(self, database_url):
         self.database_url = database_url
         self.devices = []  # Will be populated from database
         self.telegram_notifier = TelegramNotifier()
         self.discord_notifier = DiscordNotifier()
         self.notification_rules = NotificationRules()
-        self.writer = DeviceDataWriter(database_url, dual_write=dual_write)
+        self.writer = DeviceDataWriter(database_url)
 
     def update_telegram_settings(self, enabled, bot_token, chat_id):
         """Update telegram notification settings."""

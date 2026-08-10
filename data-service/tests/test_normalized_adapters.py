@@ -23,7 +23,7 @@ def test_efficiency_j_per_th():
 
 class TestBitaxeNormalize:
     def setup_method(self):
-        self.collector = BitAxeCollector('postgresql://u:p@localhost/db', dual_write=False)
+        self.collector = BitAxeCollector('postgresql://u:p@localhost/db')
 
     def test_hashrate_units_passthrough(self):
         snap = self.collector.normalize_system_info(
@@ -76,7 +76,7 @@ class TestBitaxeNormalize:
 
 class TestAvalonNormalize:
     def setup_method(self):
-        self.collector = AvalonCollector('postgresql://u:p@localhost/db', dual_write=False)
+        self.collector = AvalonCollector('postgresql://u:p@localhost/db')
 
     def test_mhs_to_ghs(self):
         assert self.collector._parse_hashrate_mhs('4500') == pytest.approx(4.5)

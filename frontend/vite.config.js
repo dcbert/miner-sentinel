@@ -96,7 +96,6 @@ export default defineConfig({
         // Dashboard components + pages with dedicated tests (BER-31 + BER-25) now included for coverage.
         'src/components/ui/**',
         'src/pages/AnalyticsDashboard.jsx',
-        'src/pages/BitAxeDashboard.jsx',
         // Note: OverviewDashboard.jsx and MiningDashboard.jsx removed from exclude (have tests in __tests__)
         // SettingsPage.jsx was never excluded and has tests.
         'src/components/dashboard/MiningPerformanceChart.jsx',

@@ -56,7 +56,7 @@ export default function LoginPage({ onLogin }) {
   }
 
   return (
-    <div className="relative min-h-screen bg-background text-foreground">
+    <main className="relative min-h-screen bg-background text-foreground">
       {/* Subtle ambient background — same calm density as the app shell */}
       <div
         className="pointer-events-none absolute inset-0 overflow-hidden"
@@ -89,7 +89,7 @@ export default function LoginPage({ onLogin }) {
               MinerSentinel
             </h1>
             <p className="mt-1.5 max-w-xs text-sm text-muted-foreground">
-              Self-hosted monitoring for Bitaxe and Avalon miners
+              Self-hosted monitoring for home Bitcoin miners
             </p>
           </div>
 
@@ -153,12 +153,12 @@ export default function LoginPage({ onLogin }) {
                       type="button"
                       onClick={() => setShowPassword((v) => !v)}
                       className={cn(
-                        'absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5',
+                        'absolute right-1.5 top-1/2 -translate-y-1/2 flex h-9 w-9 items-center justify-center rounded-md',
                         'text-muted-foreground hover:text-foreground',
                         'outline-none focus-visible:ring-2 focus-visible:ring-ring',
                       )}
                       aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      tabIndex={-1}
+                      tabIndex={0}
                     >
                       {showPassword ? (
                         <EyeOff className="h-4 w-4" strokeWidth={1.75} />
@@ -192,6 +192,6 @@ export default function LoginPage({ onLogin }) {
           </p>
         </div>
       </div>
-    </div>
+    </main>
   )
 }

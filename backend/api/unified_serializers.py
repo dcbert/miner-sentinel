@@ -1,11 +1,9 @@
 """
-Serializers for unified Device / PoolStats models with legacy API field aliases
-so existing frontend paths keep working without changes.
+Serializers for unified Device / mining / hardware / system / pool models.
 """
 from rest_framework import serializers
 
 from .models import (
-    Device,
     DeviceHardwareStats,
     DeviceMiningStats,
     DeviceSystemInfo,
@@ -13,50 +11,12 @@ from .models import (
 )
 
 
-class UnifiedDeviceAsBitaxeSerializer(serializers.ModelSerializer):
-    """Present Device (make=bitaxe) as legacy BitAxeDevice shape."""
-    device_name = serializers.CharField(source='name')
-
-    class Meta:
-        model = Device
-        fields = [
-            'id', 'device_id', 'device_name', 'ip_address',
-            'is_active', 'last_seen_at', 'error_message', 'created_at',
-        ]
-
-
-class UnifiedDeviceAsAvalonSerializer(serializers.ModelSerializer):
-    """Present Device (make=avalon) as legacy AvalonDevice shape."""
-    device_name = serializers.CharField(source='name')
-
-    class Meta:
-        model = Device
-        fields = [
-            'id', 'device_id', 'device_name', 'ip_address',
-            'is_active', 'last_seen_at', 'error_message', 'created_at',
-        ]
-
-
-class UnifiedMiningAsBitaxeSerializer(serializers.ModelSerializer):
-    device_name = serializers.CharField(source='device.name', read_only=True)
-    # Legacy FK id of device row
-    device = serializers.IntegerField(source='device_id', read_only=True)
-
-    class Meta:
-        model = DeviceMiningStats
-        fields = [
-            'id', 'device', 'device_name', 'recorded_at',
-            'hashrate_ghs', 'shares_accepted', 'shares_rejected',
-            'blocks_found', 'uptime_seconds',
-            'best_difficulty', 'best_session_difficulty',
-            'pool_url', 'pool_user', 'created_at',
-        ]
-
-
-class UnifiedMiningAsAvalonSerializer(serializers.ModelSerializer):
+class UnifiedMiningSerializer(serializers.ModelSerializer):
     device_name = serializers.CharField(source='device.name', read_only=True)
     device_id = serializers.CharField(source='device.device_id', read_only=True)
+    # Numeric FK of the parent Device row (for list views)
     device = serializers.IntegerField(source='device_id', read_only=True)
+    # Alias used by some fleet UIs
     difficulty = serializers.FloatField(source='best_difficulty', read_only=True)
 
     class Meta:
@@ -64,7 +24,8 @@ class UnifiedMiningAsAvalonSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'device', 'device_name', 'device_id', 'recorded_at',
             'hashrate_ghs', 'shares_accepted', 'shares_rejected',
-            'blocks_found', 'uptime_seconds', 'difficulty',
+            'blocks_found', 'uptime_seconds',
+            'best_difficulty', 'best_session_difficulty', 'difficulty',
             'pool_url', 'pool_user', 'created_at',
         ]
 
@@ -83,14 +44,16 @@ class UnifiedHardwareSerializer(serializers.ModelSerializer):
         ]
 
 
-class UnifiedSystemAsBitaxeSerializer(serializers.ModelSerializer):
-    """Flatten common + details into BitAxeSystemInfo-like response."""
+class UnifiedSystemSerializer(serializers.ModelSerializer):
+    """Flatten common columns + vendor details for the device detail UI."""
     device_name = serializers.CharField(source='device.name', read_only=True)
+    device_id = serializers.CharField(source='device.device_id', read_only=True)
     device = serializers.IntegerField(source='device_id', read_only=True)
 
     asic_model = serializers.SerializerMethodField()
     board_version = serializers.SerializerMethodField()
     version = serializers.SerializerMethodField()
+    firmware_version = serializers.CharField(read_only=True, allow_null=True)
     axe_os_version = serializers.SerializerMethodField()
     idf_version = serializers.SerializerMethodField()
     running_partition = serializers.SerializerMethodField()
@@ -126,9 +89,9 @@ class UnifiedSystemAsBitaxeSerializer(serializers.ModelSerializer):
     class Meta:
         model = DeviceSystemInfo
         fields = [
-            'id', 'device', 'device_name', 'recorded_at',
+            'id', 'device', 'device_name', 'device_id', 'recorded_at',
             'asic_model', 'board_version', 'hostname', 'mac_address',
-            'version', 'axe_os_version', 'idf_version', 'running_partition',
+            'version', 'firmware_version', 'axe_os_version', 'idf_version', 'running_partition',
             'ssid', 'wifi_status', 'wifi_rssi',
             'core_voltage', 'core_voltage_actual', 'expected_hashrate', 'pool_difficulty', 'small_core_count',
             'vr_temp', 'temp_target', 'overheat_mode',
@@ -228,71 +191,8 @@ class UnifiedSystemAsBitaxeSerializer(serializers.ModelSerializer):
         return self._d(obj, 'is_psram_available', False)
 
 
-class UnifiedSystemAsAvalonSerializer(serializers.ModelSerializer):
-    device_name = serializers.CharField(source='device.name', read_only=True)
-    device_id = serializers.CharField(source='device.device_id', read_only=True)
-    device = serializers.IntegerField(source='device_id', read_only=True)
-    device_model = serializers.CharField(source='model_reported', read_only=True, allow_null=True)
-    wifi_signal_strength = serializers.IntegerField(source='wifi_rssi', read_only=True, allow_null=True)
-    backup_pool_url = serializers.CharField(source='fallback_pool_url', read_only=True, allow_null=True)
-    backup_pool_user = serializers.CharField(source='fallback_pool_user', read_only=True, allow_null=True)
-
-    hardware_version = serializers.SerializerMethodField()
-    ip_address = serializers.SerializerMethodField()
-    active_pool = serializers.SerializerMethodField()
-    system_uptime_seconds = serializers.SerializerMethodField()
-    memory_usage_percent = serializers.SerializerMethodField()
-    storage_usage_percent = serializers.SerializerMethodField()
-    target_frequency = serializers.SerializerMethodField()
-    target_voltage = serializers.SerializerMethodField()
-    auto_tune_enabled = serializers.SerializerMethodField()
-
-    class Meta:
-        model = DeviceSystemInfo
-        fields = [
-            'id', 'device', 'device_name', 'device_id', 'recorded_at',
-            'device_model', 'firmware_version', 'hardware_version',
-            'serial_number', 'mac_address', 'ip_address', 'hostname',
-            'wifi_ssid', 'wifi_signal_strength', 'primary_pool_url',
-            'primary_pool_user', 'backup_pool_url', 'backup_pool_user',
-            'active_pool', 'system_uptime_seconds', 'memory_usage_percent',
-            'storage_usage_percent', 'target_frequency', 'target_voltage',
-            'auto_tune_enabled', 'created_at',
-        ]
-
-    def _d(self, obj, key, default=None):
-        return (obj.details or {}).get(key, default)
-
-    def get_hardware_version(self, obj):
-        return self._d(obj, 'hardware_version')
-
-    def get_ip_address(self, obj):
-        return self._d(obj, 'device_ip') or obj.device.ip_address
-
-    def get_active_pool(self, obj):
-        return self._d(obj, 'active_pool') or obj.primary_pool_url
-
-    def get_system_uptime_seconds(self, obj):
-        return self._d(obj, 'system_uptime_seconds', 0)
-
-    def get_memory_usage_percent(self, obj):
-        return self._d(obj, 'memory_usage_percent', 0.0)
-
-    def get_storage_usage_percent(self, obj):
-        return self._d(obj, 'storage_usage_percent', 0.0)
-
-    def get_target_frequency(self, obj):
-        return self._d(obj, 'target_frequency', 0.0)
-
-    def get_target_voltage(self, obj):
-        return self._d(obj, 'target_voltage', 0.0)
-
-    def get_auto_tune_enabled(self, obj):
-        return self._d(obj, 'auto_tune_enabled', False)
-
-
-class UnifiedPoolAsLegacySerializer(serializers.ModelSerializer):
-    """Present PoolStats as legacy BitAxePoolStats field names for the frontend."""
+class UnifiedPoolSerializer(serializers.ModelSerializer):
+    """Pool stats with display-string aliases used by the mining dashboard."""
     hashrate_1m = serializers.CharField(source='hashrate_1m_display', read_only=True, allow_null=True)
     hashrate_5m = serializers.CharField(source='hashrate_5m_display', read_only=True, allow_null=True)
     hashrate_1hr = serializers.CharField(source='hashrate_1h_display', read_only=True, allow_null=True)
@@ -308,10 +208,11 @@ class UnifiedPoolAsLegacySerializer(serializers.ModelSerializer):
     class Meta:
         model = PoolStats
         fields = [
-            'id', 'pool_address', 'recorded_at',
+            'id', 'pool_type', 'pool_address', 'recorded_at',
             'hashrate_1m', 'hashrate_5m', 'hashrate_1hr', 'hashrate_1d', 'hashrate_7d',
             'lastshare', 'workers', 'shares', 'bestshare', 'bestever', 'authorised',
-            'hashrate_1m_ghs', 'hashrate_1d_ghs',
+            'hashrate_1m_ghs', 'hashrate_5m_ghs', 'hashrate_1h_ghs', 'hashrate_1d_ghs', 'hashrate_7d_ghs',
+            'best_share', 'best_ever',
             'lastshare_datetime', 'authorised_datetime',
         ]
 
