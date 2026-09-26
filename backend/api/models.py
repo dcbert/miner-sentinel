@@ -170,11 +170,13 @@ class PoolStats(models.Model):
 
     POOL_CKPOOL = 'ckpool'
     POOL_PUBLICPOOL = 'publicpool'
+    POOL_BTCPOWLAB = 'btcpowlab'
     POOL_OCEAN = 'ocean'
     POOL_OTHER = 'other'
     POOL_TYPE_CHOICES = [
         (POOL_CKPOOL, 'CKPool'),
         (POOL_PUBLICPOOL, 'Public Pool'),
+        (POOL_BTCPOWLAB, 'BTC PoW Lab'),
         (POOL_OCEAN, 'Ocean'),
         (POOL_OTHER, 'Other'),
     ]
@@ -298,6 +300,7 @@ class CollectorSettings(models.Model):
     POOL_TYPE_CHOICES = [
         ('ckpool', 'CKPool'),
         ('publicpool', 'Public Pool'),
+        ('btcpowlab', 'BTC PoW Lab'),
     ]
 
     # Polling configuration
@@ -343,6 +346,20 @@ class CollectorSettings(models.Model):
         blank=True,
         default='http://localhost:3334',
         help_text="PublicPool API URL (e.g., http://localhost:3334 or https://web.public-pool.io)"
+    )
+
+    # BTC PoW Lab configuration
+    btcpowlab_address = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="Bitcoin address for BTC PoW Lab statistics"
+    )
+    btcpowlab_url = models.CharField(
+        max_length=255,
+        blank=True,
+        default='https://btcpowlab-pool.com/public/v1',
+        help_text="BTC PoW Lab public API base URL"
     )
 
     # Telegram notifications (optional)

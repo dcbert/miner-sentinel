@@ -82,6 +82,8 @@ export default function SettingsPage() {
     ckpool_url: 'https://eusolo.ckpool.org',
     publicpool_address: '',
     publicpool_url: 'http://localhost:3334',
+    btcpowlab_address: '',
+    btcpowlab_url: 'https://btcpowlab-pool.com/public/v1',
     telegram_enabled: false,
     telegram_bot_token: '',
     telegram_chat_id: '',
@@ -133,6 +135,8 @@ export default function SettingsPage() {
           ckpool_url: collectorRes.data.ckpool_url || 'https://eusolo.ckpool.org',
           publicpool_address: collectorRes.data.publicpool_address || '',
           publicpool_url: collectorRes.data.publicpool_url || 'http://localhost:3334',
+          btcpowlab_address: collectorRes.data.btcpowlab_address || '',
+          btcpowlab_url: collectorRes.data.btcpowlab_url || 'https://btcpowlab-pool.com/public/v1',
           telegram_enabled: collectorRes.data.telegram_enabled || false,
           telegram_bot_token: '', // Never returned from API for security
           telegram_chat_id: collectorRes.data.telegram_chat_id || '',
@@ -607,6 +611,7 @@ export default function SettingsPage() {
                   >
                     <SelectOption value="ckpool">CKPool (Solo Mining)</SelectOption>
                     <SelectOption value="publicpool">Public Pool (Local/Self-hosted)</SelectOption>
+                    <SelectOption value="btcpowlab">BTC PoW Lab (Hybrid Solo)</SelectOption>
                   </Select>
                   <p className="text-xs text-muted-foreground">
                     Select which mining pool to use for statistics collection
@@ -735,6 +740,51 @@ export default function SettingsPage() {
                     />
                     <p className="text-xs text-muted-foreground">
                       Your local PublicPool instance URL (e.g., http://192.168.1.100:3334)
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* BTC PoW Lab Settings */}
+              {collectorSettings.pool_type === 'btcpowlab' && (
+                <div className="grid gap-4 grid-cols-1 pt-4 border-t w-full max-w-full">
+                  <div className="space-y-2 min-w-0 overflow-hidden">
+                    <Label htmlFor="btcpowlab_address" className="text-sm">BTC PoW Lab Bitcoin Address</Label>
+                    <Input
+                      id="btcpowlab_address"
+                      type="text"
+                      className="w-full"
+                      placeholder="bc1q..."
+                      value={collectorSettings.btcpowlab_address}
+                      onChange={(e) =>
+                        updateCollectorSettings({
+                          ...collectorSettings,
+                          btcpowlab_address: e.target.value,
+                        })
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Your verified BTC PoW Lab mining address
+                    </p>
+                  </div>
+
+                  <div className="space-y-2 min-w-0 overflow-hidden">
+                    <Label htmlFor="btcpowlab_url" className="text-sm">BTC PoW Lab API URL</Label>
+                    <Input
+                      id="btcpowlab_url"
+                      type="url"
+                      className="w-full"
+                      placeholder="https://btcpowlab-pool.com/public/v1"
+                      value={collectorSettings.btcpowlab_url}
+                      onChange={(e) =>
+                        updateCollectorSettings({
+                          ...collectorSettings,
+                          btcpowlab_url: e.target.value,
+                        })
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Read-only public API base URL
                     </p>
                   </div>
                 </div>

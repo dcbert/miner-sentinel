@@ -14,6 +14,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from collectors.avalon_collector import AvalonCollector
 from collectors.bitaxe_collector import BitAxeCollector
+from collectors.btcpowlab_collector import collect_btcpowlab_data
 from collectors.ckpool_collector import collect_ckpool_data
 from collectors.nerdnos_collector import NerdNOSCollector
 from collectors.nmaxe_collector import NMAxeCollector
@@ -51,6 +52,8 @@ collector_settings = {
     'ckpool_url': 'https://eusolo.ckpool.org',
     'publicpool_address': '',
     'publicpool_url': 'http://localhost:3334',
+    'btcpowlab_address': '',
+    'btcpowlab_url': 'https://btcpowlab-pool.com/public/v1',
     'telegram_enabled': False,
     'telegram_bot_token': '',
     'telegram_chat_id': '',
@@ -79,6 +82,7 @@ def load_settings_from_database():
             SELECT polling_interval_minutes, device_check_interval_minutes,
                    pool_type, ckpool_address, ckpool_url,
                    publicpool_address, publicpool_url,
+                   btcpowlab_address, btcpowlab_url,
                    telegram_enabled, telegram_bot_token, telegram_chat_id,
                    discord_enabled, discord_webhook_url,
                    notification_rules
@@ -229,7 +233,24 @@ def poll_all_sources():
     pool_type = collector_settings.get('pool_type', 'ckpool')
 
     try:
-        if pool_type == 'publicpool':
+        if pool_type == 'btcpowlab':
+            btcpowlab_address = collector_settings.get('btcpowlab_address', '')
+            if btcpowlab_address:
+                logger.info(f"Polling BTC PoW Lab statistics for address: {btcpowlab_address[:10]}...")
+                conn = psycopg2.connect(DATABASE_URL)
+                collect_btcpowlab_data(
+                    conn,
+                    btcpowlab_address,
+                    collector_settings.get(
+                        'btcpowlab_url',
+                        'https://btcpowlab-pool.com/public/v1',
+                    ),
+                )
+                conn.close()
+                logger.info("BTC PoW Lab polling completed")
+            else:
+                logger.info("Skipping BTC PoW Lab polling - no address configured")
+        elif pool_type == 'publicpool':
             # Poll PublicPool statistics
             publicpool_address = collector_settings.get('publicpool_address', '')
             if publicpool_address:

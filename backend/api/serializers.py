@@ -84,6 +84,8 @@ class CollectorSettingsSerializer(serializers.ModelSerializer):
             'ckpool_url',
             'publicpool_address',
             'publicpool_url',
+            'btcpowlab_address',
+            'btcpowlab_url',
             'telegram_enabled',
             'telegram_bot_token',
             'telegram_bot_token_configured',

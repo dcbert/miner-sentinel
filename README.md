@@ -251,8 +251,8 @@ Runtime polling, pool selection, notifications, and energy settings are primaril
 |---------|-------------|---------|
 | Polling interval | Full collect cycle (devices + pool) | 15 minutes |
 | Device check interval | Reload active devices | 5 minutes |
-| Pool type | `ckpool` or `publicpool` | CKPool |
-| CKPool / Public Pool address & URL | Solo stats source | see model defaults |
+| Pool type | `ckpool`, `publicpool`, or `btcpowlab` | CKPool |
+| Pool address & API URL | Address statistics source for the selected pool | see model defaults |
 | Telegram | Enable, bot token, chat ID | off |
 | Discord | Enable, webhook URL | off |
 | Energy rate & currency | Cost analysis | `0.12` USD |
@@ -337,7 +337,7 @@ miner-sentinel/
 │   ├── api/                 # Unified models, views, migrations, tests
 │   └── requirements*.txt
 ├── data-service/            # Flask collectors + Telegram/Discord notifiers
-│   ├── collectors/          # bitaxe, avalon, nmaxe, nerdnos, ckpool, publicpool
+│   ├── collectors/          # bitaxe, avalon, nmaxe, nerdnos, ckpool, publicpool, btcpowlab
 │   ├── notifications/
 │   └── tests/
 ├── frontend/                # React (Vite) SPA
