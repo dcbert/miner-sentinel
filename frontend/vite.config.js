@@ -5,6 +5,10 @@ import { defineConfig } from 'vite'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // esbuild 0.28+ cannot lower destructuring to Vite's default legacy browserslist
+  build: {
+    target: 'es2022',
+  },
   // Ensure React is pre-bundled (by esbuild in Vite/Vitest dep optimizer) with development
   // NODE_ENV so its index.js picks react.development.js (full act support) instead of prod min.
   // This + the test-level define/inlines fixes the "act() not supported in production" hard error
