@@ -171,12 +171,14 @@ class PoolStats(models.Model):
     POOL_CKPOOL = 'ckpool'
     POOL_PUBLICPOOL = 'publicpool'
     POOL_BTCPOWLAB = 'btcpowlab'
+    POOL_PARASITE = 'parasite'
     POOL_OCEAN = 'ocean'
     POOL_OTHER = 'other'
     POOL_TYPE_CHOICES = [
         (POOL_CKPOOL, 'CKPool'),
         (POOL_PUBLICPOOL, 'Public Pool'),
         (POOL_BTCPOWLAB, 'BTC PoW Lab'),
+        (POOL_PARASITE, 'Parasite'),
         (POOL_OCEAN, 'Ocean'),
         (POOL_OTHER, 'Other'),
     ]
@@ -301,6 +303,7 @@ class CollectorSettings(models.Model):
         ('ckpool', 'CKPool'),
         ('publicpool', 'Public Pool'),
         ('btcpowlab', 'BTC PoW Lab'),
+        ('parasite', 'Parasite'),
     ]
 
     # Polling configuration
@@ -360,6 +363,20 @@ class CollectorSettings(models.Model):
         blank=True,
         default='https://btcpowlab-pool.com/public/v1',
         help_text="BTC PoW Lab public API base URL"
+    )
+
+    # Parasite Pool configuration
+    parasite_address = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="Bitcoin address for Parasite Pool statistics"
+    )
+    parasite_url = models.CharField(
+        max_length=255,
+        blank=True,
+        default='https://parasite.space/api',
+        help_text="Parasite Pool public API base URL"
     )
 
     # Telegram notifications (optional)

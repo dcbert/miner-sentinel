@@ -84,6 +84,8 @@ export default function SettingsPage() {
     publicpool_url: 'http://localhost:3334',
     btcpowlab_address: '',
     btcpowlab_url: 'https://btcpowlab-pool.com/public/v1',
+    parasite_address: '',
+    parasite_url: 'https://parasite.space/api',
     telegram_enabled: false,
     telegram_bot_token: '',
     telegram_chat_id: '',
@@ -137,6 +139,8 @@ export default function SettingsPage() {
           publicpool_url: collectorRes.data.publicpool_url || 'http://localhost:3334',
           btcpowlab_address: collectorRes.data.btcpowlab_address || '',
           btcpowlab_url: collectorRes.data.btcpowlab_url || 'https://btcpowlab-pool.com/public/v1',
+          parasite_address: collectorRes.data.parasite_address || '',
+          parasite_url: collectorRes.data.parasite_url || 'https://parasite.space/api',
           telegram_enabled: collectorRes.data.telegram_enabled || false,
           telegram_bot_token: '', // Never returned from API for security
           telegram_chat_id: collectorRes.data.telegram_chat_id || '',
@@ -612,6 +616,7 @@ export default function SettingsPage() {
                     <SelectOption value="ckpool">CKPool (Solo Mining)</SelectOption>
                     <SelectOption value="publicpool">Public Pool (Local/Self-hosted)</SelectOption>
                     <SelectOption value="btcpowlab">BTC PoW Lab (Hybrid Solo)</SelectOption>
+                    <SelectOption value="parasite">Parasite Pool</SelectOption>
                   </Select>
                   <p className="text-xs text-muted-foreground">
                     Select which mining pool to use for statistics collection
@@ -785,6 +790,51 @@ export default function SettingsPage() {
                     />
                     <p className="text-xs text-muted-foreground">
                       Read-only public API base URL
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Parasite Pool Settings */}
+              {collectorSettings.pool_type === 'parasite' && (
+                <div className="grid gap-4 grid-cols-1 pt-4 border-t w-full max-w-full">
+                  <div className="space-y-2 min-w-0 overflow-hidden">
+                    <Label htmlFor="parasite_address" className="text-sm">Parasite Bitcoin Address</Label>
+                    <Input
+                      id="parasite_address"
+                      type="text"
+                      className="w-full"
+                      placeholder="bc1q..."
+                      value={collectorSettings.parasite_address}
+                      onChange={(e) =>
+                        updateCollectorSettings({
+                          ...collectorSettings,
+                          parasite_address: e.target.value,
+                        })
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Your Parasite mining address (must be public on parasite.space)
+                    </p>
+                  </div>
+
+                  <div className="space-y-2 min-w-0 overflow-hidden">
+                    <Label htmlFor="parasite_url" className="text-sm">Parasite API URL</Label>
+                    <Input
+                      id="parasite_url"
+                      type="url"
+                      className="w-full"
+                      placeholder="https://parasite.space/api"
+                      value={collectorSettings.parasite_url}
+                      onChange={(e) =>
+                        updateCollectorSettings({
+                          ...collectorSettings,
+                          parasite_url: e.target.value,
+                        })
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Public stats API base URL (stratum is parasite.wtf:42069 on the miner)
                     </p>
                   </div>
                 </div>

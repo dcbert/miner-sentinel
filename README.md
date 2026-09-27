@@ -29,7 +29,7 @@ Home fleets often mix manufacturers and firmwares, each with its own UI and metr
 - **Canonical units** for hashrate (GH/s), power (W), temperature (°C), and efficiency (J/TH)
 - **Historical metrics** for trends, efficiency, and device comparison
 - **Alerts** on critical events via Telegram and Discord
-- **Solo pool tracking** (CKPool / Public Pool) including best shares
+- **Solo pool tracking** (CKPool / Public Pool / BTC PoW Lab / Parasite) including best shares
 - **Energy cost and solo-mining probability** estimates from fleet hashrate
 
 ---
@@ -81,6 +81,8 @@ All makes share:
 
 - **CKPool** (default): solo stats, workers, best shares
 - **Public Pool**: configurable API URL and Bitcoin address
+- **BTC PoW Lab**: hybrid solo public API
+- **Parasite Pool**: public stats from parasite.space (Bitcoin address)
 - Pool type and endpoints are stored in `collector_settings` and edited in Settings
 
 ### Analytics and cost analysis
@@ -131,7 +133,7 @@ graph TB
     BE --> DB
     DS --> DB
     DS --> Miners["Miners by make<br/>Bitaxe · Avalon · NMAxe · NerdNOS"]
-    DS --> Pools["CKPool / Public Pool APIs"]
+    DS --> Pools["CKPool / Public Pool / Parasite APIs"]
     DS --> Notify["Telegram / Discord"]
 ```
 
@@ -251,7 +253,7 @@ Runtime polling, pool selection, notifications, and energy settings are primaril
 |---------|-------------|---------|
 | Polling interval | Full collect cycle (devices + pool) | 15 minutes |
 | Device check interval | Reload active devices | 5 minutes |
-| Pool type | `ckpool`, `publicpool`, or `btcpowlab` | CKPool |
+| Pool type | `ckpool`, `publicpool`, `btcpowlab`, or `parasite` | CKPool |
 | Pool address & API URL | Address statistics source for the selected pool | see model defaults |
 | Telegram | Enable, bot token, chat ID | off |
 | Discord | Enable, webhook URL | off |
@@ -337,7 +339,7 @@ miner-sentinel/
 │   ├── api/                 # Unified models, views, migrations, tests
 │   └── requirements*.txt
 ├── data-service/            # Flask collectors + Telegram/Discord notifiers
-│   ├── collectors/          # bitaxe, avalon, nmaxe, nerdnos, ckpool, publicpool, btcpowlab
+│   ├── collectors/          # bitaxe, avalon, nmaxe, nerdnos, ckpool, publicpool, btcpowlab, parasite
 │   ├── notifications/
 │   └── tests/
 ├── frontend/                # React (Vite) SPA

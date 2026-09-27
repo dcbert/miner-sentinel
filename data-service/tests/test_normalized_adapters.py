@@ -13,6 +13,7 @@ from collectors.avalon_collector import AvalonCollector
 from collectors.bitaxe_collector import BitAxeCollector
 from collectors.ckpool_collector import CKPoolCollector
 from collectors.normalized import efficiency_j_per_th
+from collectors.parasite_collector import ParasiteCollector
 from collectors.publicpool_collector import PublicPoolCollector
 
 
@@ -152,3 +153,28 @@ class TestPublicPoolNormalize:
         assert snap.workers == 1
         assert snap.details.get('workers')
         assert snap.pool_total_miners == 50
+
+
+class TestParasiteNormalizeAdapter:
+    def setup_method(self):
+        self.collector = ParasiteCollector(
+            None, pool_url='https://parasite.space/api', pool_address='bc1q'
+        )
+
+    def test_5m_window_and_difficulty_parse(self):
+        user = {
+            'hashrate': 1_000_000_000_000,
+            'workers': 1,
+            'bestDifficulty': '2.2G',
+            'uptime': '1d 0h',
+            'lastSubmission': '1m ago',
+            'workerData': [],
+        }
+        pool = {'hashrate': 1e15, 'users': 10, 'highestDifficulty': '1T'}
+        snap = self.collector.normalize_stats(user, pool)
+        assert snap.pool_type == 'parasite'
+        assert snap.hashrate_5m_ghs == pytest.approx(1000.0)
+        assert snap.hashrate_1m_ghs == pytest.approx(1000.0)
+        assert snap.best_share == pytest.approx(2.2e9)
+        assert snap.pool_total_miners == 10
+        assert snap.pool_total_hashrate_ghs == pytest.approx(1_000_000.0)

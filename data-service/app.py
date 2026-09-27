@@ -18,6 +18,7 @@ from collectors.btcpowlab_collector import collect_btcpowlab_data
 from collectors.ckpool_collector import collect_ckpool_data
 from collectors.nerdnos_collector import NerdNOSCollector
 from collectors.nmaxe_collector import NMAxeCollector
+from collectors.parasite_collector import collect_parasite_data
 from collectors.publicpool_collector import collect_publicpool_data
 from decouple import config
 from flask import Flask, jsonify
@@ -54,6 +55,8 @@ collector_settings = {
     'publicpool_url': 'http://localhost:3334',
     'btcpowlab_address': '',
     'btcpowlab_url': 'https://btcpowlab-pool.com/public/v1',
+    'parasite_address': '',
+    'parasite_url': 'https://parasite.space/api',
     'telegram_enabled': False,
     'telegram_bot_token': '',
     'telegram_chat_id': '',
@@ -83,6 +86,7 @@ def load_settings_from_database():
                    pool_type, ckpool_address, ckpool_url,
                    publicpool_address, publicpool_url,
                    btcpowlab_address, btcpowlab_url,
+                   parasite_address, parasite_url,
                    telegram_enabled, telegram_bot_token, telegram_chat_id,
                    discord_enabled, discord_webhook_url,
                    notification_rules
@@ -250,6 +254,23 @@ def poll_all_sources():
                 logger.info("BTC PoW Lab polling completed")
             else:
                 logger.info("Skipping BTC PoW Lab polling - no address configured")
+        elif pool_type == 'parasite':
+            parasite_address = collector_settings.get('parasite_address', '')
+            if parasite_address:
+                logger.info(f"Polling Parasite statistics for address: {parasite_address[:10]}...")
+                conn = psycopg2.connect(DATABASE_URL)
+                collect_parasite_data(
+                    conn,
+                    parasite_address,
+                    collector_settings.get(
+                        'parasite_url',
+                        'https://parasite.space/api',
+                    ),
+                )
+                conn.close()
+                logger.info("Parasite polling completed")
+            else:
+                logger.info("Skipping Parasite polling - no address configured")
         elif pool_type == 'publicpool':
             # Poll PublicPool statistics
             publicpool_address = collector_settings.get('publicpool_address', '')

@@ -86,6 +86,8 @@ class CollectorSettingsSerializer(serializers.ModelSerializer):
             'publicpool_url',
             'btcpowlab_address',
             'btcpowlab_url',
+            'parasite_address',
+            'parasite_url',
             'telegram_enabled',
             'telegram_bot_token',
             'telegram_bot_token_configured',
