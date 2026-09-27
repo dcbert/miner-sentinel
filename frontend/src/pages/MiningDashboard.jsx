@@ -21,6 +21,7 @@ import { useNavigate } from 'react-router-dom';
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 import ChartFrame from '@/components/charts/ChartFrame'
+import AdvisorPanel from '@/components/devices/AdvisorPanel'
 import MakeBadge, { makeIconPlateClass } from '@/components/devices/MakeBadge';
 import EmptyState from '@/components/feedback/EmptyState'
 import SectionHeader from '@/components/layout/SectionHeader'
@@ -157,6 +158,7 @@ export default function MiningDashboard() {
   const [makeFilter, setMakeFilter] = useState('all')
   const [fleetView, setFleetView] = useState('cards') // cards | table
   const [poolHistoryPage, setPoolHistoryPage] = useState(0)
+  const [stratumCompare, setStratumCompare] = useState(null)
   const POOL_HISTORY_PAGE_SIZE = 25
 
   useEffect(() => {
@@ -172,7 +174,7 @@ export default function MiningDashboard() {
       setLoading(true)
       const rangeParams = toTimeRangeParams(range)
 
-      const [poolRes, latestRes, statsRes, devicesRes, miningRes, hardwareRes] = await Promise.all([
+      const [poolRes, latestRes, statsRes, devicesRes, miningRes, hardwareRes, stratumRes] = await Promise.all([
         // Prefer trend endpoint scoped to range; fall back to paginated list
         api.get('/api/pool/hashrate_trend/', { params: rangeParams }).catch(() =>
           api.get('/api/pool/', { params: { ...rangeParams, limit: 20000 } }).catch(() => ({ data: [] })),
@@ -182,6 +184,7 @@ export default function MiningDashboard() {
         api.get('/api/devices/').catch(() => ({ data: { results: [] } })),
         api.get('/api/mining/latest/').catch(() => ({ data: [] })),
         api.get('/api/hardware/latest/').catch(() => ({ data: [] })),
+        api.get('/api/pool/stratum-compare/').catch(() => ({ data: null })),
       ])
 
       const poolData = Array.isArray(poolRes.data)
@@ -193,6 +196,7 @@ export default function MiningDashboard() {
       setDevices(unwrapList(devicesRes.data))
       setDeviceMiningStats(Array.isArray(miningRes.data) ? miningRes.data : [])
       setDeviceHardwareStats(Array.isArray(hardwareRes.data) ? hardwareRes.data : [])
+      setStratumCompare(stratumRes.data || null)
       setUpdatedAt(new Date())
     } catch (error) {
       console.error('Error fetching mining data:', error)
@@ -424,6 +428,8 @@ export default function MiningDashboard() {
           </Button>
         </div>
       </div>
+
+      <AdvisorPanel />
 
       {/* KPI strip */}
       {loading && !latestStats && devices.length === 0 ? (
@@ -685,6 +691,105 @@ export default function MiningDashboard() {
         </TabsContent>
 
         <TabsContent value="pool" className="space-y-6">
+          {stratumCompare && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Layers className="h-4 w-4" />
+                  Device stratum vs selected pool
+                </CardTitle>
+                <CardDescription>
+                  Primary / fallback stratum from each miner beside the configured{' '}
+                  <span className="font-medium text-foreground">
+                    {stratumCompare.selected_pool?.pool_type || 'pool'}
+                  </span>{' '}
+                  stats sample (not concurrent multi-pool polling).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-3 text-sm">
+                  <div className="rounded-md border border-border/60 p-3">
+                    <p className="text-xs text-muted-foreground">Selected pool</p>
+                    <p className="font-medium capitalize">{stratumCompare.selected_pool?.pool_type}</p>
+                    <p className="font-mono text-xs truncate mt-1">
+                      {stratumCompare.selected_pool?.configured_address || '—'}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border/60 p-3">
+                    <p className="text-xs text-muted-foreground">Pool 1m hashrate</p>
+                    <p className="font-medium">
+                      {stratumCompare.selected_pool?.latest?.hashrate_1m ||
+                        (stratumCompare.selected_pool?.latest?.hashrate_1m_ghs != null
+                          ? `${stratumCompare.selected_pool.latest.hashrate_1m_ghs} GH/s`
+                          : '—')}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border/60 p-3">
+                    <p className="text-xs text-muted-foreground">Workers (pool)</p>
+                    <p className="font-medium">
+                      {stratumCompare.selected_pool?.latest?.workers ?? '—'}
+                    </p>
+                  </div>
+                </div>
+                {(stratumCompare.devices || []).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No active devices</p>
+                ) : (
+                  <div className="overflow-x-auto rounded-md border border-border/60">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Device</TableHead>
+                          <TableHead>Primary stratum</TableHead>
+                          <TableHead>Fallback</TableHead>
+                          <TableHead>Active</TableHead>
+                          <TableHead>vs pool</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {stratumCompare.devices.map((row) => (
+                          <TableRow key={`${row.make}-${row.device_id}`}>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <MakeBadge make={row.make} />
+                                <span className="text-sm font-medium">{row.name}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="font-mono text-xs max-w-[220px] truncate">
+                              {row.primary_pool_url || '—'}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs max-w-[180px] truncate">
+                              {row.fallback_pool_url || '—'}
+                            </TableCell>
+                            <TableCell>
+                              {row.using_fallback === true
+                                ? 'Fallback'
+                                : row.using_fallback === false
+                                  ? 'Primary'
+                                  : '—'}
+                            </TableCell>
+                            <TableCell>
+                              {row.matches_selected_pool_type === true ? (
+                                <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/20">
+                                  Match
+                                </Badge>
+                              ) : row.matches_selected_pool_type === false ? (
+                                <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20">
+                                  Different
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">Unknown</span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           <ChartFrame
             title="Hashrate Trend"
             description={`1-minute vs 24-hour average · ${hashrateChartData.length} point${hashrateChartData.length !== 1 ? 's' : ''} in selected range`}

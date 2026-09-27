@@ -1,11 +1,21 @@
 import GlobalTimeRange from '@/components/layout/GlobalTimeRange'
 import { useTheme } from '@/components/theme-provider'
 import { Button } from '@/components/ui/button'
+import { toast } from '@/components/ui/toaster'
 import { useAuth } from '@/lib/AuthContext'
+import {
+  BTC_DONATE_ADDRESS,
+  GITHUB_ISSUES_URL,
+  GITHUB_REPO_URL,
+} from '@/lib/projectLinks'
 import { isTimeRangeRoute } from '@/lib/timeRange'
 import { cn } from '@/lib/utils'
 import {
+  Bell,
+  Bitcoin,
+  CircleDot,
   Cpu,
+  Github,
   Home,
   LogOut,
   Menu,
@@ -55,6 +65,12 @@ const NAV_SECTIONS = [
         icon: TrendingUp,
         match: (p) => p === '/analytics' || p.startsWith('/analytics/'),
       },
+      {
+        path: '/activity',
+        label: 'Activity',
+        icon: Bell,
+        match: (p) => p === '/activity' || p.startsWith('/activity/'),
+      },
     ],
   },
   {
@@ -83,6 +99,10 @@ const PAGE_META = {
   '/analytics': {
     title: 'Analytics',
     description: 'Predictions, energy, and cost',
+  },
+  '/activity': {
+    title: 'Activity',
+    description: 'Alerts, records, and fleet events',
   },
   '/settings': {
     title: 'Settings',
@@ -140,6 +160,19 @@ export default function Layout({ children }) {
     theme === 'system' ? 'Theme: system' : theme === 'light' ? 'Theme: light' : 'Theme: dark'
 
   const initials = (user?.username || 'U').slice(0, 2).toUpperCase()
+
+  const copyDonateAddress = async () => {
+    try {
+      await navigator.clipboard.writeText(BTC_DONATE_ADDRESS)
+      toast({ title: 'Address copied', description: 'BTC donate address copied to clipboard' })
+    } catch {
+      toast({
+        title: 'Copy failed',
+        description: 'Could not copy the donate address',
+        variant: 'destructive',
+      })
+    }
+  }
 
   const sidebar = (
     <>
@@ -224,6 +257,54 @@ export default function Layout({ children }) {
           ))}
         </div>
       </nav>
+
+      {/* Support */}
+      <div className="shrink-0 border-t border-border/80 px-3 py-2.5">
+        <p className="mb-1.5 px-1 text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground/80">
+          Support
+        </p>
+        <div className="flex items-center gap-0.5">
+          <a
+            href={GITHUB_REPO_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="View on GitHub"
+            className={cn(
+              'inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-[12px]',
+              'text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground',
+              'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+            )}
+          >
+            <Github className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+            <span className="truncate">GitHub</span>
+          </a>
+          <a
+            href={GITHUB_ISSUES_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Report an issue"
+            className={cn(
+              'inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-[12px]',
+              'text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground',
+              'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+            )}
+          >
+            <CircleDot className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+            <span className="truncate">Issue</span>
+          </a>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 flex-1 gap-1.5 px-2 text-[12px] text-muted-foreground hover:text-foreground"
+            onClick={copyDonateAddress}
+            title="Copy BTC donate address"
+            aria-label="Copy BTC donate address"
+          >
+            <Bitcoin className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+            <span className="truncate">Donate</span>
+          </Button>
+        </div>
+      </div>
 
       {/* Account */}
       <div className="shrink-0 border-t border-border/80 p-3">

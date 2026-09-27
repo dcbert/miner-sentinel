@@ -10,6 +10,7 @@ import {
     Network,
     RefreshCw,
     Settings,
+    SlidersHorizontal,
     Thermometer,
     TrendingUp,
     Wifi,
@@ -20,6 +21,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
+import DeviceControls from '@/components/devices/DeviceControls'
 import MakeBadge, { makeIconPlateClass } from '@/components/devices/MakeBadge'
 import ErrorState from '@/components/feedback/ErrorState'
 import DataFreshness from '@/components/metrics/DataFreshness'
@@ -372,7 +374,7 @@ export default function BitAxeDeviceDetails() {
       {/* MAIN CONTENT TABS */}
       {/* ============================================ */}
       <Tabs defaultValue="performance" className="space-y-4">
-        <TabsList className="w-full overflow-x-auto lg:w-auto lg:inline-grid lg:grid-cols-4">
+        <TabsList className="w-full overflow-x-auto lg:w-auto lg:inline-grid lg:grid-cols-5">
           <TabsTrigger value="performance" className="gap-1.5 sm:gap-2">
             <Activity className="h-3.5 w-3.5 sm:h-4 sm:w-4 hidden sm:block" />
             Performance
@@ -388,6 +390,10 @@ export default function BitAxeDeviceDetails() {
           <TabsTrigger value="system" className="gap-1.5 sm:gap-2">
             <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4 hidden sm:block" />
             System
+          </TabsTrigger>
+          <TabsTrigger value="controls" className="gap-1.5 sm:gap-2">
+            <SlidersHorizontal className="h-3.5 w-3.5 sm:h-4 sm:w-4 hidden sm:block" />
+            Controls
           </TabsTrigger>
         </TabsList>
 
@@ -988,6 +994,10 @@ export default function BitAxeDeviceDetails() {
               </div>
             </>
           )}
+        </TabsContent>
+
+        <TabsContent value="controls" className="space-y-6">
+          <DeviceControls make={make} deviceId={deviceId} device={device} />
         </TabsContent>
       </Tabs>
     </div>

@@ -3,6 +3,7 @@ import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import { TimeRangeProvider } from '@/lib/TimeRangeContext';
+import ActivityPage from '@/pages/ActivityPage';
 import AnalyticsDashboard from '@/pages/AnalyticsDashboard';
 import AvalonDeviceDetails from '@/pages/AvalonDeviceDetails';
 import BitAxeDeviceDetailsRedirect from '@/pages/BitAxeDeviceDetailsRedirect';
@@ -49,6 +50,7 @@ function AppRoutes() {
         <Routes>
           <Route path="/" element={<OverviewDashboard />} />
           <Route path="/mining" element={<MiningDashboard />} />
+          <Route path="/activity" element={<ActivityPage />} />
           {/* Unified device detail (all makes) */}
           <Route path="/devices/:make/:deviceId" element={<DeviceDetails />} />
           {/* Legacy detail routes → unified path */}

@@ -22,6 +22,9 @@ from collectors.normalized import (
     was_device_online,
 )
 from notifications.discord_notifier import DiscordNotifier
+from notifications.push_notifier import PushNotifier, push_notifier_from_settings
+from notifications.emitter import emit_alert, resolve_open_alerts
+from notifications.health_checks import run_device_health_checks
 from notifications.rules import NotificationRules
 from notifications.telegram_notifier import TelegramNotifier
 from retrying import retry
@@ -39,7 +42,9 @@ class AvalonCollector:
         self.devices = []  # Will be populated from database
         self.telegram_notifier = TelegramNotifier()
         self.discord_notifier = DiscordNotifier()
+        self.push_notifier = PushNotifier()
         self.notification_rules = NotificationRules()
+        self.alert_preferences = {}
         self.writer = DeviceDataWriter(database_url)
 
     def update_telegram_settings(self, enabled, bot_token, chat_id):
@@ -64,22 +69,40 @@ class AvalonCollector:
             self.discord_notifier = DiscordNotifier(webhook_url='')
             logger.info("Discord notifier disabled")
 
+    def update_push_settings(self, settings: dict):
+        """Update ntfy / Gotify / webhook push channels from collector_settings."""
+        self.push_notifier = push_notifier_from_settings(settings or {})
+        logger.info(f"Push notifier {'enabled' if self.push_notifier.enabled else 'disabled'}")
+
+
     def update_notification_rules(self, rules):
         """Update per-event alert toggles and thresholds."""
         self.notification_rules = NotificationRules(rules)
         logger.info(f"Notification rules updated: {self.notification_rules.as_dict()}")
 
-    def _notify(self, event_key: str, method_name: str, *args, **kwargs):
-        """Send to Telegram + Discord if the event rule is enabled."""
-        if not self.notification_rules.enabled(event_key):
-            logger.debug(f"Notification skipped ({event_key} disabled)")
-            return
-        tg = getattr(self.telegram_notifier, method_name, None)
-        dc = getattr(self.discord_notifier, method_name, None)
-        if tg:
-            tg(*args, **kwargs)
-        if dc:
-            dc(*args, **kwargs)
+    def update_alert_preferences(self, preferences):
+        self.alert_preferences = preferences or {}
+
+    def _notify(self, event_key: str, method_name: str, *args, device_id=None, device_name=None, message=None, payload=None, **kwargs):
+        did = device_id if device_id is not None else (args[0] if args else '')
+        dname = device_name if device_name is not None else (args[1] if len(args) > 1 else did)
+        emit_alert(
+            database_url=self.database_url,
+            event_key=event_key,
+            method_name=method_name,
+            telegram=self.telegram_notifier,
+            discord=self.discord_notifier,
+            push=self.push_notifier,
+            rules=self.notification_rules,
+            args=args,
+            kwargs=kwargs,
+            device_make=self.MAKE,
+            device_id=str(did) if did is not None else '',
+            device_name=str(dname) if dname is not None else '',
+            message=message,
+            payload=payload,
+            preferences=self.alert_preferences,
+        )
 
     def update_devices(self, devices):
         """Update the list of devices to monitor from database."""
@@ -204,13 +227,37 @@ class AvalonCollector:
     def restart_device(self, device_ip, device_id, device_name):
         """Restart an Avalon device via socket API."""
         try:
-            # Use cgminer ascset command for reboot
-            command = "ascset|0,reboot,0"
+            # cgminer ascset requires command + parameter fields (not pipe-in-command)
             logger.info(f"Attempting to restart device {device_id} at {device_ip}:4028")
+            sock = None
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(10)
+                sock.connect((device_ip, 4028))
+                sock.send(json.dumps({'command': 'ascset', 'parameter': '0,reboot,0'}).encode('utf-8'))
+                response = b''
+                while True:
+                    try:
+                        data = sock.recv(4096)
+                        if not data:
+                            break
+                        response += data
+                    except socket.timeout:
+                        break
+                raw = response.decode('utf-8', errors='ignore').replace('\x00', '').strip()
+                parsed = json.loads(raw) if raw else {}
+            finally:
+                if sock:
+                    sock.close()
 
-            response = self._socket_request(device_ip, command)
+            status = parsed.get('STATUS')
+            ok = False
+            if isinstance(status, list) and status and isinstance(status[0], dict):
+                ok = str(status[0].get('STATUS', '')).upper() in ('S', 'SUCCESS')
+            elif status == 'S':
+                ok = True
 
-            if response.get('STATUS') == 'S':  # Success status
+            if ok:
                 logger.info(f"Successfully sent restart command to device {device_id}")
 
                 # Send notification about the restart
@@ -222,7 +269,7 @@ class AvalonCollector:
                 )
                 return True
             else:
-                logger.warning(f"Restart command may have failed for device {device_id}: {response}")
+                logger.warning(f"Restart command may have failed for device {device_id}: {parsed}")
                 return False
 
         except Exception as e:
@@ -328,6 +375,7 @@ class AvalonCollector:
                 duration_str = self._format_duration(offline_duration)
 
                 logger.info(f"Device {device_id} came back online after {duration_str}")
+                resolve_open_alerts(self.database_url, 'device_offline', self.MAKE, device_id)
                 self._notify(
                     'device_online',
                     'send_device_online_alert',
@@ -638,6 +686,24 @@ class AvalonCollector:
                 self.check_hashrate_stagnation(
                     device_db_id, device_id, device_name,
                     snapshot.mining.hashrate_ghs, device_ip,
+                )
+                run_device_health_checks(
+                    database_url=self.database_url,
+                    make=self.MAKE,
+                    device_db_id=device_db_id,
+                    device_id=device_id,
+                    device_name=device_name,
+                    temperature_c=snapshot.hardware.temperature_c if snapshot.hardware else None,
+                    fan_speed_rpm=snapshot.hardware.fan_speed_rpm if snapshot.hardware else None,
+                    hashrate_ghs=snapshot.mining.hashrate_ghs,
+                    expected_hashrate_ghs=(
+                        snapshot.system.expected_hashrate_ghs if snapshot.system else None
+                    ),
+                    telegram=self.telegram_notifier,
+                    discord=self.discord_notifier,
+                    push=self.push_notifier,
+                    rules=self.notification_rules,
+                    preferences=self.alert_preferences,
                 )
 
             logger.info(

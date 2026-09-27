@@ -19,7 +19,7 @@
 
 ## Overview
 
-MinerSentinel is a self-hosted monitoring stack for Bitcoin home miners. It normalizes vendor APIs into **one device registry and shared time-series tables**, then serves a single dashboard for fleet performance, hardware health, pool stats, cost analysis, and alerts—without sending your data to a third-party cloud.
+MinerSentinel is a self-hosted monitoring stack for Bitcoin home miners. It normalizes vendor APIs into **one device registry and shared time-series tables**, then serves a single dashboard for fleet performance, hardware health, pool stats, cost analysis, **Activity alerts**, and **per-device Controls**—without sending your data to a third-party cloud.
 
 ### Why MinerSentinel?
 
@@ -28,9 +28,12 @@ Home fleets often mix manufacturers and firmwares, each with its own UI and metr
 - **One registry for all makes** (`/api/devices/`) with a make field (Bitaxe, Avalon, NMAxe, NerdNOS, …)
 - **Canonical units** for hashrate (GH/s), power (W), temperature (°C), and efficiency (J/TH)
 - **Historical metrics** for trends, efficiency, and device comparison
-- **Alerts** on critical events via Telegram and Discord
+- **Alerts** on critical events via Telegram, Discord, ntfy, Gotify, or a generic webhook — plus an in-app **Activity** journal
 - **Solo pool tracking** (CKPool / Public Pool / BTC PoW Lab / Parasite) including best shares
 - **Energy cost and solo-mining probability** estimates from fleet hashrate
+- **Remote Controls** (reboot, fan, Bitaxe freq/voltage presets, Avalon workmode) and **LAN discovery**
+
+**New here?** Follow the step-by-step guide: **[docs/TUTORIAL.md](docs/TUTORIAL.md)**.
 
 ---
 
@@ -40,9 +43,13 @@ Home fleets often mix manufacturers and firmwares, each with its own UI and metr
 |----------|--------|----------------|
 | ![Overview](docs/images/overview-dashboard.png) | ![Mining](docs/images/mining-dashboard.png) | ![Device](docs/images/device-details.png) |
 
-| Analytics | Settings |
-|-----------|----------|
-| ![Analytics](docs/images/analytics-dashboard.png) | ![Settings](docs/images/settings-page.png) |
+| Controls | Activity | Analytics |
+|----------|----------|-----------|
+| ![Controls](docs/images/device-controls.png) | ![Activity](docs/images/activity-page.png) | ![Analytics](docs/images/analytics-dashboard.png) |
+
+| Settings |
+|----------|
+| ![Settings](docs/images/settings-page.png) |
 
 ---
 
@@ -92,25 +99,35 @@ All makes share:
 - Best difficulty tracking and solo mining probability estimates
 - **Cost analysis**: energy rate, currency, kWh usage, optional revenue-style stats from cached network hashrate and BTC price
 
-### Alerts
+### Alerts & Activity
 
-Telegram and Discord (webhook) notifications for:
+Telegram, Discord (webhook), **ntfy**, Gotify, and generic JSON webhook notifications for:
 
 | Event | Description |
 |-------|-------------|
 | Device offline / back online | Reachability failures and recovery |
 | Hashrate stagnation | Prolonged low/stalled hashrate |
-| New best difficulty | Personal best share difficulty |
-| Auto-restart | Restart attempted after stagnation (where the collector supports it) |
+| New best difficulty | Personal best share (**highlight**, not an “open problem”) |
+| Auto-restart | Restart attempted after stagnation (where supported) |
+| Temperature / fan / pool / collector | Thermal, dead fan, pool API down, collector unhealthy |
+| Expected hashrate drop | Live HR below expected by a configured percent |
 
-Credentials live under **Settings → Notifications** (secrets are write-only after save).
+Credentials live under **Settings → Notifications** (secrets are write-only after save). Every alert is also stored in the **Activity** journal (`Needs attention` vs `Highlights`).
+
+### Device Controls & discovery
+
+- Per-device **Controls** tab: capability-gated reboot, fan (slider), Bitaxe frequency/voltage **presets + custom**, pause/resume, pool change; Avalon **workmode** (Low/Mid/High)
+- Avalon frequency/voltage writes are intentionally **not** exposed (unreliable on home Nano/Mini)
+- **Discover LAN** from Settings → Devices
+- **Advisor** on Mining with ranked next actions and one-click control hooks
+- Inventory **Export CSV**
 
 ### UI
 
 - React 18, Vite, Tailwind CSS, Shadcn-style components
 - Dark theme by default with light mode toggle
 - Session auth + CSRF; login page for unauthenticated users
-- Pages: **Overview**, **Mining**, **Analytics**, **Settings**
+- Pages: **Overview**, **Mining**, **Analytics**, **Activity**, **Settings**
 - Unified device detail at `/devices/:make/:deviceId` (old `/bitaxe/device/…` and `/avalon/device/…` routes redirect)
 - Charts via Recharts; loading skeletons and semantic status tokens
 
@@ -134,24 +151,24 @@ graph TB
     DS --> DB
     DS --> Miners["Miners by make<br/>Bitaxe · Avalon · NMAxe · NerdNOS"]
     DS --> Pools["CKPool / Public Pool / Parasite APIs"]
-    DS --> Notify["Telegram / Discord"]
+    DS --> Notify["Telegram / Discord / ntfy / Gotify / webhook"]
 ```
 
 | Service | Stack | Role |
 |---------|-------|------|
-| **Frontend** | React 18, Vite 6, Tailwind, Recharts | Dashboards and settings UI |
-| **Backend** | Django 5, DRF, Gunicorn (prod) | REST API, auth, aggregation, analytics |
-| **Data service** | Flask, APScheduler, collectors | Polls devices & pools; writes unified tables; alerts |
-| **Database** | PostgreSQL | Devices, time-series metrics, collector settings |
+| **Frontend** | React 18, Vite 6, Tailwind, Recharts | Dashboards, Activity, Controls, settings |
+| **Backend** | Django 5, DRF, Gunicorn (prod) | REST API, auth, aggregation, analytics, control proxy |
+| **Data service** | Flask, APScheduler, collectors | Polls devices & pools; writes unified tables; alerts; control adapters |
+| **Database** | PostgreSQL | Devices, time-series metrics, collector settings, alert_events |
 
 ### Data flow
 
-1. You register devices (with **make**) and pool/notification settings in the UI.
-2. The **data-service** loads settings and active devices, polls on an interval (default **15 minutes**), normalizes vendor payloads, and inserts into unified tables only.
+1. You register devices (with **make**) and pool/notification settings in the UI (or Discover LAN).
+2. The **data-service** loads settings and active devices, polls on an interval (default **2 minutes** in fresh installs; editable in Settings), normalizes vendor payloads, and inserts into unified tables only.
 3. Device list reloads more often (default **5 minutes**). Settings changes reapply without a full redeploy.
-4. The **frontend** reads fleet data from the **unified** backend API (`/api/devices/`, `/api/mining/`, `/api/hardware/`, `/api/pool/`, analytics).
+4. The **frontend** reads fleet data from the **unified** backend API (`/api/devices/`, `/api/mining/`, `/api/hardware/`, `/api/pool/`, `/api/activity/`, analytics).
 
-Schema migration notes and historical dual-write work are documented in [`docs/plans/unified-device-schema.md`](docs/plans/unified-device-schema.md).
+Schema migration notes and historical dual-write work are documented in [`docs/plans/unified-device-schema.md`](docs/plans/unified-device-schema.md). Full operator walkthrough: [`docs/TUTORIAL.md`](docs/TUTORIAL.md).
 
 ---
 
@@ -202,8 +219,9 @@ Schema migration notes and historical dual-write work are documented in [`docs/p
 
 5. **Add devices**
 
-   - Settings → Devices → **Add Device** (choose make, set IP / optional port)
-   - Configure pool address and optional Telegram/Discord under Settings
+   - Settings → Devices → **Add Device** (choose make, set IP / optional port), or **Discover LAN**
+   - Configure pool address and Telegram / Discord / ntfy under Settings → Notifications
+   - See **[docs/TUTORIAL.md](docs/TUTORIAL.md)** for the full first-run walkthrough
 
 ### Production compose
 
@@ -251,12 +269,15 @@ Runtime polling, pool selection, notifications, and energy settings are primaril
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Polling interval | Full collect cycle (devices + pool) | 15 minutes |
+| Polling interval | Full collect cycle (devices + pool) | 2 minutes |
 | Device check interval | Reload active devices | 5 minutes |
 | Pool type | `ckpool`, `publicpool`, `btcpowlab`, or `parasite` | CKPool |
 | Pool address & API URL | Address statistics source for the selected pool | see model defaults |
 | Telegram | Enable, bot token, chat ID | off |
 | Discord | Enable, webhook URL | off |
+| ntfy / Gotify / webhook | Push channels (topic URL / Gotify / JSON POST) | off |
+| Metrics retention | Days to keep device/pool stats (`0` = forever) | 90 |
+| Alert retention | Days to keep resolved Activity events (`0` = forever) | 0 |
 | Energy rate & currency | Cost analysis | `0.12` USD |
 | Show revenue stats | Analytics cost tab | on |
 
@@ -272,6 +293,11 @@ Manual poll: Settings can trigger `POST /api/settings/collector/poll/` (proxied 
 
 1. Channel settings → Integrations → Webhooks → New webhook
 2. Paste the webhook URL under Settings → Notifications → Discord
+
+### ntfy (recommended on Umbrel)
+
+1. Create a topic on [ntfy.sh](https://ntfy.sh) or your self-hosted ntfy
+2. Settings → Notifications → enable ntfy, paste the full topic URL, optional token, Save, then **Send test**
 
 ---
 
@@ -296,6 +322,9 @@ There are **no** brand-prefixed device APIs (`/api/bitaxe/*`, `/api/avalon/*` ha
 |--------|----------|-------------|
 | CRUD | `/api/devices/` | Device registry (`id` PK; `?make=`, `?active_only=true`) |
 | GET | `/api/devices/<make>/<device_id>/details/` | Full detail payload (mining, hardware, system, trends) |
+| GET | `/api/devices/<make>/<device_id>/capabilities/` | Control capability map for the Controls UI |
+| POST | `/api/devices/<make>/<device_id>/control/` | Run a control action (`reboot`, `fan`, `frequency`, …) |
+| POST | `/api/devices/discover/` | LAN discovery (AxeOS HTTP + Avalon :4028) |
 | GET | `/api/mining/` | Mining stats (`?make=`, `?device_id=`, time window) |
 | GET | `/api/mining/latest/` | Latest mining row per active device |
 | GET | `/api/hardware/` | Hardware stats |
@@ -304,14 +333,21 @@ There are **no** brand-prefixed device APIs (`/api/bitaxe/*`, `/api/avalon/*` ha
 | GET | `/api/pool/latest/` | Latest pool snapshot |
 | GET | `/api/pool/hashrate_trend/` | Pool hashrate series |
 | GET | `/api/pool/statistics/` | Aggregated pool stats |
+| GET | `/api/pool/stratum-compare/` | Device stratum vs selected pool |
 
-### Analytics and settings
+### Analytics, activity, and settings
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/overview/analytics/` | Fleet overview analytics |
 | GET | `/api/analytics/detailed/` | Detailed analytics (incl. cost analysis) |
+| GET | `/api/activity/` | Activity journal (`?open=`, `?kind=problem\|highlight\|all`) |
+| POST | `/api/activity/<id>/acknowledge/` | Acknowledge (close) an open alert |
+| POST | `/api/activity/<id>/snooze/` | Snooze for N minutes |
+| GET | `/api/advisor/` | Ranked Advisor suggestions |
+| GET | `/api/export/inventory.csv` | Device inventory CSV |
 | GET / POST | `/api/settings/collector/` | Read / update collector settings |
+| GET | `/api/settings/collector/status/` | Honest collector health (proxied `/status`) |
 | POST | `/api/settings/collector/poll/` | Trigger immediate collection |
 | GET | `/api/settings/network-data/` | Cached BTC price / network hashrate |
 | POST | `/api/settings/network-data/refresh/` | Refresh network data cache |
@@ -323,9 +359,11 @@ Not published in the default compose file; used by the backend / operators insid
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check |
-| GET | `/status` | Scheduler + device counts |
+| GET | `/status` | Scheduler + device counts + last poll health |
 | POST | `/poll` | Manual full poll |
 | POST | `/settings/reload` | Reload DB settings and reschedule jobs |
+| POST | `/control` | Device control adapter entrypoint |
+| POST | `/discover` | LAN discovery scan |
 
 Django Admin remains available at `/admin/`.
 
@@ -338,13 +376,15 @@ miner-sentinel/
 ├── backend/                 # Django project (minersentinel) + api app
 │   ├── api/                 # Unified models, views, migrations, tests
 │   └── requirements*.txt
-├── data-service/            # Flask collectors + Telegram/Discord notifiers
-│   ├── collectors/          # bitaxe, avalon, nmaxe, nerdnos, ckpool, publicpool, btcpowlab, parasite
-│   ├── notifications/
+├── data-service/            # Flask collectors + notifiers + control adapters
+│   ├── collectors/          # bitaxe, avalon, nmaxe, nerdnos, pools…
+│   ├── control/             # reboot / fan / freq / workmode adapters
+│   ├── notifications/       # Telegram, Discord, ntfy/Gotify/webhook, emitter
 │   └── tests/
 ├── frontend/                # React (Vite) SPA
-│   └── src/pages/           # Overview, Mining, Analytics, Settings, DeviceDetails
+│   └── src/pages/           # Overview, Mining, Analytics, Activity, Settings, DeviceDetails
 ├── docs/
+│   ├── TUTORIAL.md          # Complete operator tutorial
 │   ├── images/              # Screenshots and logo
 │   └── plans/               # Design / migration notes
 ├── umbrel/                  # Umbrel App Store package
@@ -426,6 +466,8 @@ Root [`pyproject.toml`](pyproject.toml) holds shared pytest options and coverage
 docker compose up -d --build
 docker compose logs -f data-service
 docker compose exec backend python manage.py createsuperuser
+docker compose exec backend python manage.py seed_lab_devices
+docker compose exec backend python manage.py prune_retention
 docker compose down
 ```
 
@@ -437,14 +479,24 @@ docker compose exec backend python manage.py verify_device_unification
 
 ---
 
+## Documentation
+
+| Doc | Contents |
+|-----|----------|
+| [docs/TUTORIAL.md](docs/TUTORIAL.md) | Complete install → devices → pool → alerts → Controls tutorial |
+| [umbrel/README.md](umbrel/README.md) | Umbrel packaging and install notes |
+| [docs/plans/unified-device-schema.md](docs/plans/unified-device-schema.md) | Schema unification design notes |
+
+---
+
 ## Roadmap
 
 Ideas under consideration (not commitments):
 
-- Additional miner adapters (Antminer, Whatsminer, Braiins-class, …) on the same schema
-- Richer multi-pool concurrent polling in the product UI
-- Export/import of device inventory and settings
-- Optional long-term metric retention policies
+- Additional miner adapters (Antminer, Whatsminer, Braiins BMM) — read-only first; Braiins/Antminer write control deferred until vendor APIs are verified
+- Concurrent multi-pool polling of every pool type (UI already compares device stratum vs the selected pool)
+- Export/import of full settings packs
+- Browser Web Push (VAPID) — ntfy / Gotify / webhook already supported for Umbrel-friendly push
 
 Contributions and issue reports welcome.
 

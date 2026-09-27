@@ -21,6 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import NotificationsSettings from '@/components/settings/NotificationsSettings'
 import { useTheme } from '@/components/theme-provider'
+import { toast } from '@/components/ui/toaster'
 import api from '@/lib/api';
 import {
   deviceStatusLabel,
@@ -32,13 +33,23 @@ import {
 } from '@/lib/devices'
 import { formatRelativeTime } from '@/lib/formatters'
 import {
+  BTC_DONATE_ADDRESS,
+  GITHUB_ISSUES_URL,
+  GITHUB_REPO_URL,
+} from '@/lib/projectLinks'
+import {
   AlertCircle,
   Bell,
+  Bitcoin,
   CheckCircle2,
+  CircleDot,
   Clock,
+  Copy,
   Cpu,
   DollarSign,
   Edit,
+  Github,
+  Info,
   Plus,
   RefreshCw,
   Server,
@@ -48,7 +59,9 @@ import {
   Sun,
   Trash2,
   Wifi,
-  WifiOff
+  WifiOff,
+  Radar,
+  Download,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -58,6 +71,8 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
+  const [discovering, setDiscovering] = useState(false)
+  const [discovered, setDiscovered] = useState([])
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -75,7 +90,7 @@ export default function SettingsPage() {
 
   // Data collector + notification settings (shared API singleton)
   const [collectorSettings, setCollectorSettings] = useState({
-    polling_interval_minutes: 15,
+    polling_interval_minutes: 2,
     device_check_interval_minutes: 5,
     pool_type: 'ckpool',
     ckpool_address: '',
@@ -93,7 +108,24 @@ export default function SettingsPage() {
     discord_enabled: false,
     discord_webhook_url: '',
     discord_webhook_url_configured: false,
+    ntfy_enabled: false,
+    ntfy_url: '',
+    ntfy_token: '',
+    ntfy_token_configured: false,
+    gotify_enabled: false,
+    gotify_url: '',
+    gotify_token: '',
+    gotify_token_configured: false,
+    webhook_enabled: false,
+    webhook_url: '',
+    webhook_url_configured: false,
     notification_rules: {},
+    quiet_hours_enabled: false,
+    quiet_hours_start: '22:00',
+    quiet_hours_end: '07:00',
+    alert_repeat_minutes: 60,
+    metrics_retention_days: 90,
+    alert_retention_days: 0,
     energy_rate: 0.12,
     energy_currency: 'USD',
     show_revenue_stats: true,
@@ -119,18 +151,18 @@ export default function SettingsPage() {
       setLoading(true)
       setError(null)
 
-      const [devicesRes, collectorRes] = await Promise.all([
+      const [devicesRes, collectorRes, statusRes] = await Promise.all([
         api.get('/api/devices/').catch(() => ({ data: { results: [] } })),
         api.get('/api/settings/collector/').catch(() => ({ data: null })),
+        api.get('/api/settings/collector/status/').catch(() => ({ data: null })),
       ])
 
       setDevices(unwrapList(devicesRes.data))
 
       if (collectorRes.data) {
-        setCollectorStatus(collectorRes.data)
         setCollectorDirty(false)
         setCollectorSettings({
-          polling_interval_minutes: collectorRes.data.polling_interval_minutes || 15,
+          polling_interval_minutes: collectorRes.data.polling_interval_minutes || 2,
           device_check_interval_minutes: collectorRes.data.device_check_interval_minutes || 5,
           pool_type: collectorRes.data.pool_type || 'ckpool',
           ckpool_address: collectorRes.data.ckpool_address || '',
@@ -148,12 +180,30 @@ export default function SettingsPage() {
           discord_enabled: collectorRes.data.discord_enabled || false,
           discord_webhook_url: '', // Never returned from API for security
           discord_webhook_url_configured: collectorRes.data.discord_webhook_url_configured || false,
+          ntfy_enabled: collectorRes.data.ntfy_enabled || false,
+          ntfy_url: collectorRes.data.ntfy_url || '',
+          ntfy_token: '',
+          ntfy_token_configured: collectorRes.data.ntfy_token_configured || false,
+          gotify_enabled: collectorRes.data.gotify_enabled || false,
+          gotify_url: collectorRes.data.gotify_url || '',
+          gotify_token: '',
+          gotify_token_configured: collectorRes.data.gotify_token_configured || false,
+          webhook_enabled: collectorRes.data.webhook_enabled || false,
+          webhook_url: '',
+          webhook_url_configured: collectorRes.data.webhook_url_configured || false,
           notification_rules: collectorRes.data.notification_rules || {},
+          quiet_hours_enabled: collectorRes.data.quiet_hours_enabled || false,
+          quiet_hours_start: collectorRes.data.quiet_hours_start || '22:00',
+          quiet_hours_end: collectorRes.data.quiet_hours_end || '07:00',
+          alert_repeat_minutes: collectorRes.data.alert_repeat_minutes ?? 60,
+          metrics_retention_days: collectorRes.data.metrics_retention_days ?? 90,
+          alert_retention_days: collectorRes.data.alert_retention_days ?? 0,
           energy_rate: collectorRes.data.energy_rate || 0.12,
           energy_currency: collectorRes.data.energy_currency || 'USD',
           show_revenue_stats: collectorRes.data.show_revenue_stats !== undefined ? collectorRes.data.show_revenue_stats : true,
         })
       }
+      setCollectorStatus(statusRes?.data || null)
     } catch (err) {
       console.error('Error fetching settings data:', err)
       setError('Failed to load settings')
@@ -173,6 +223,19 @@ export default function SettingsPage() {
       return
     }
     setSettingsTab(next)
+  }
+
+  const copyDonateAddress = async () => {
+    try {
+      await navigator.clipboard.writeText(BTC_DONATE_ADDRESS)
+      toast({ title: 'Address copied', description: 'BTC donate address copied to clipboard' })
+    } catch {
+      toast({
+        title: 'Copy failed',
+        description: 'Could not copy the donate address',
+        variant: 'destructive',
+      })
+    }
   }
 
   const openAddDialog = () => {
@@ -254,6 +317,69 @@ export default function SettingsPage() {
     }
   }
 
+  const handleDiscover = async () => {
+    try {
+      setDiscovering(true)
+      setError(null)
+      const res = await api.post('/api/devices/discover/', {
+        seed_ips: ['192.168.1.7', '192.168.1.11', '192.168.1.12'],
+      })
+      setDiscovered(res.data?.devices || [])
+      setSuccess(`Discovery found ${res.data?.count ?? 0} device(s)`)
+      setTimeout(() => setSuccess(null), 4000)
+    } catch (err) {
+      console.error('Discovery failed:', err)
+      setError(err.response?.data?.error || 'LAN discovery failed')
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
+  const handleAddDiscovered = async (item) => {
+    try {
+      setError(null)
+      await api.post('/api/devices/', {
+        device_id: item.suggested_device_id || item.ip_address.replace(/\./g, '-'),
+        device_name: item.suggested_name || item.ip_address,
+        make: item.make,
+        ip_address: item.ip_address,
+        port: item.port,
+        is_active: true,
+      })
+      setSuccess(`Added ${item.suggested_name || item.ip_address}`)
+      fetchData()
+      setDiscovered((prev) =>
+        prev.map((d) =>
+          d.ip_address === item.ip_address ? { ...d, already_registered: true } : d,
+        ),
+      )
+      setTimeout(() => setSuccess(null), 3000)
+    } catch (err) {
+      setError(
+        err.response?.data?.device_id?.[0] ||
+          err.response?.data?.detail ||
+          'Failed to add discovered device',
+      )
+    }
+  }
+
+  const handleExportInventory = async () => {
+    try {
+      const res = await api.get('/api/export/inventory.csv', {
+        params: { alerts: true },
+        responseType: 'blob',
+      })
+      const url = URL.createObjectURL(res.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'minersentinel-inventory.csv'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError('Export failed')
+    }
+  }
+
   const handleSaveCollectorSettings = async () => {
     try {
       setSavingSettings(true)
@@ -263,6 +389,9 @@ export default function SettingsPage() {
       const payload = { ...collectorSettings }
       if (!payload.telegram_bot_token) delete payload.telegram_bot_token
       if (!payload.discord_webhook_url) delete payload.discord_webhook_url
+      if (!payload.ntfy_token) delete payload.ntfy_token
+      if (!payload.gotify_token) delete payload.gotify_token
+      if (!payload.webhook_url) delete payload.webhook_url
 
       const res = await api.post('/api/settings/collector/', payload)
       setSuccess(res.data?.message || 'Settings saved successfully')
@@ -491,10 +620,25 @@ export default function SettingsPage() {
             <Sun className="h-4 w-4 mr-2" />
             Appearance
           </TabsTrigger>
+          <TabsTrigger value="about">
+            <Info className="h-4 w-4 mr-2" />
+            About
+          </TabsTrigger>
         </TabsList>
 
         {/* Devices Tab */}
         <TabsContent value="devices" className="space-y-4 sm:space-y-6">
+          <Card className="border-border/70 bg-muted/20">
+            <CardContent className="pt-4 pb-4 text-sm text-muted-foreground">
+              <p>
+                <span className="font-medium text-foreground">Discover LAN</span> scans for AxeOS
+                and Avalon miners on your network. Prioritized next actions live in the{' '}
+                <span className="font-medium text-foreground">Advisor</span> panel on the Mining
+                page; per-device Controls (reboot, fan, Avalon workmode) are on each device detail
+                page.
+              </p>
+            </CardContent>
+          </Card>
           <Card>
             <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
@@ -506,15 +650,63 @@ export default function SettingsPage() {
                   All miner makes in one registry ({devices.length} device{devices.length !== 1 ? 's' : ''})
                 </CardDescription>
               </div>
-              <Button onClick={openAddDialog} className="w-full sm:w-auto">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Device
-              </Button>
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                <Button variant="outline" onClick={handleExportInventory} className="w-full sm:w-auto">
+                  <Download className="h-4 w-4 mr-2" />
+                  Export CSV
+                </Button>
+                <Button variant="outline" onClick={handleDiscover} disabled={discovering} className="w-full sm:w-auto">
+                  <Radar className={`h-4 w-4 mr-2 ${discovering ? 'animate-spin' : ''}`} />
+                  {discovering ? 'Scanning…' : 'Discover LAN'}
+                </Button>
+                <Button onClick={openAddDialog} className="w-full sm:w-auto">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Device
+                </Button>
+              </div>
             </CardHeader>
             <CardContent className="px-2 sm:px-6">
               <DeviceTable devices={devices} />
             </CardContent>
           </Card>
+
+          {discovered.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Discovered on LAN</CardTitle>
+                <CardDescription>
+                  AxeOS HTTP and cgminer :4028 responses — add unregistered devices to the registry
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {discovered.map((item) => (
+                  <div
+                    key={`${item.make}-${item.ip_address}`}
+                    className="flex flex-col gap-2 rounded-md border border-border/60 p-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">
+                        {item.suggested_name || item.ip_address}{' '}
+                        <MakeBadge make={item.make} />
+                      </p>
+                      <p className="font-mono text-xs text-muted-foreground">
+                        {item.ip_address}
+                        {item.port ? `:${item.port}` : ''}
+                        {item.model ? ` · ${item.model}` : ''}
+                      </p>
+                    </div>
+                    {item.already_registered ? (
+                      <Badge variant="secondary">Already registered</Badge>
+                    ) : (
+                      <Button size="sm" onClick={() => handleAddDiscovered(item)}>
+                        Add
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         {/* Data Collector Tab */}
@@ -533,15 +725,41 @@ export default function SettingsPage() {
               {/* Status badges */}
               <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-4 min-w-0 max-w-full">
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">
-                    <CheckCircle2 className="w-3 h-3 mr-1" />
-                    Running
-                  </Badge>
+                  {collectorStatus?.reachable === false ? (
+                    <Badge variant="outline" className="bg-red-500/10 text-red-500 border-red-500/20">
+                      <AlertCircle className="w-3 h-3 mr-1" />
+                      Unreachable
+                    </Badge>
+                  ) : collectorStatus?.status === 'degraded' ? (
+                    <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20">
+                      <AlertCircle className="w-3 h-3 mr-1" />
+                      Degraded
+                    </Badge>
+                  ) : collectorStatus?.reachable || collectorStatus?.status === 'healthy' || collectorStatus?.status === 'starting' ? (
+                    <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">
+                      <CheckCircle2 className="w-3 h-3 mr-1" />
+                      {collectorStatus?.status === 'starting' ? 'Starting' : 'Healthy'}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-muted-foreground">
+                      Status unknown
+                    </Badge>
+                  )}
                 </div>
                 {collectorStatus?.next_run && (
                   <div className="flex items-center gap-2 text-muted-foreground text-xs sm:text-sm">
                     <Clock className="w-4 h-4" />
                     Next run: {new Date(collectorStatus.next_run).toLocaleTimeString()}
+                  </div>
+                )}
+                {collectorStatus?.last_success_at && (
+                  <div className="flex items-center gap-2 text-muted-foreground text-xs sm:text-sm">
+                    Last success: {formatRelativeTime(collectorStatus.last_success_at)}
+                  </div>
+                )}
+                {collectorStatus?.last_error && (
+                  <div className="w-full text-xs text-amber-600 break-words">
+                    Last error: {collectorStatus.last_error}
                   </div>
                 )}
                 <div className="flex items-center gap-2 text-muted-foreground text-xs sm:text-sm">
@@ -575,7 +793,7 @@ export default function SettingsPage() {
                     }
                   />
                   <p className="text-xs text-muted-foreground">
-                    How often to poll devices for new data
+                    How often to poll devices for new data (home fleets: 1–2 min recommended)
                   </p>
                 </div>
 
@@ -840,6 +1058,54 @@ export default function SettingsPage() {
                 </div>
               )}
 
+              {/* Retention */}
+              <div className="pt-4 border-t space-y-4">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4" />
+                  <Label className="text-base font-medium">Data retention</Label>
+                </div>
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="metrics_retention">Metrics retention (days)</Label>
+                    <Input
+                      id="metrics_retention"
+                      type="number"
+                      min="0"
+                      max="3650"
+                      value={collectorSettings.metrics_retention_days ?? 90}
+                      onChange={(e) =>
+                        updateCollectorSettings({
+                          ...collectorSettings,
+                          metrics_retention_days: parseInt(e.target.value, 10) || 0,
+                        })
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Prune device/pool stats older than this. 0 = keep forever. Default 90.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="alert_retention">Resolved alert retention (days)</Label>
+                    <Input
+                      id="alert_retention"
+                      type="number"
+                      min="0"
+                      max="3650"
+                      value={collectorSettings.alert_retention_days ?? 0}
+                      onChange={(e) =>
+                        updateCollectorSettings({
+                          ...collectorSettings,
+                          alert_retention_days: parseInt(e.target.value, 10) || 0,
+                        })
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Prune resolved Activity events older than this. 0 = forever (open alerts never pruned).
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {/* Cost Analysis Settings */}
               <div className="pt-4 border-t space-y-4">
                 <div className="flex items-center gap-2">
@@ -977,6 +1243,74 @@ export default function SettingsPage() {
                   </button>
                 )
               })}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="about" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                <Info className="h-4 w-4 sm:h-5 sm:w-5" />
+                About MinerSentinel
+              </CardTitle>
+              <CardDescription className="text-xs sm:text-sm">
+                Open-source, self-hosted Bitcoin home-mining monitor. Contributions and issue reports are welcome.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => window.open(GITHUB_REPO_URL, '_blank', 'noopener,noreferrer')}
+              >
+                <Github className="h-4 w-4" strokeWidth={1.75} />
+                View on GitHub
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={() => window.open(GITHUB_ISSUES_URL, '_blank', 'noopener,noreferrer')}
+              >
+                <CircleDot className="h-4 w-4" strokeWidth={1.75} />
+                Report an issue
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                <Bitcoin className="h-4 w-4 sm:h-5 sm:w-5" />
+                Support the project
+              </CardTitle>
+              <CardDescription className="text-xs sm:text-sm">
+                To support this project, donate BTC here:
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <code
+                  className="min-w-0 flex-1 truncate rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-xs sm:text-sm"
+                  title={BTC_DONATE_ADDRESS}
+                >
+                  {BTC_DONATE_ADDRESS}
+                </code>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 gap-2"
+                  onClick={copyDonateAddress}
+                >
+                  <Copy className="h-4 w-4" strokeWidth={1.75} />
+                  Copy
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

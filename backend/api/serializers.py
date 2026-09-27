@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import (
+    AlertEvent,
     CollectorSettings,
     Device,
     DEFAULT_NOTIFICATION_RULES,
@@ -72,6 +73,9 @@ class CollectorSettingsSerializer(serializers.ModelSerializer):
     """Serializer for data collector settings."""
     telegram_bot_token_configured = serializers.SerializerMethodField()
     discord_webhook_url_configured = serializers.SerializerMethodField()
+    ntfy_token_configured = serializers.SerializerMethodField()
+    gotify_token_configured = serializers.SerializerMethodField()
+    webhook_url_configured = serializers.SerializerMethodField()
     notification_rules = serializers.JSONField(required=False)
 
     class Meta:
@@ -95,7 +99,24 @@ class CollectorSettingsSerializer(serializers.ModelSerializer):
             'discord_enabled',
             'discord_webhook_url',
             'discord_webhook_url_configured',
+            'ntfy_enabled',
+            'ntfy_url',
+            'ntfy_token',
+            'ntfy_token_configured',
+            'gotify_enabled',
+            'gotify_url',
+            'gotify_token',
+            'gotify_token_configured',
+            'webhook_enabled',
+            'webhook_url',
+            'webhook_url_configured',
             'notification_rules',
+            'quiet_hours_enabled',
+            'quiet_hours_start',
+            'quiet_hours_end',
+            'alert_repeat_minutes',
+            'metrics_retention_days',
+            'alert_retention_days',
             'energy_rate',
             'energy_currency',
             'show_revenue_stats',
@@ -111,6 +132,9 @@ class CollectorSettingsSerializer(serializers.ModelSerializer):
             'created_at',
             'telegram_bot_token_configured',
             'discord_webhook_url_configured',
+            'ntfy_token_configured',
+            'gotify_token_configured',
+            'webhook_url_configured',
             'cached_btc_price',
             'cached_network_hashrate',
             'cached_network_difficulty',
@@ -119,6 +143,9 @@ class CollectorSettingsSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             'telegram_bot_token': {'write_only': True},
             'discord_webhook_url': {'write_only': True},
+            'ntfy_token': {'write_only': True},
+            'gotify_token': {'write_only': True},
+            'webhook_url': {'write_only': True},
         }
 
     def get_telegram_bot_token_configured(self, obj):
@@ -126,6 +153,15 @@ class CollectorSettingsSerializer(serializers.ModelSerializer):
 
     def get_discord_webhook_url_configured(self, obj):
         return bool(obj.discord_webhook_url and obj.discord_webhook_url.strip())
+
+    def get_ntfy_token_configured(self, obj):
+        return bool(obj.ntfy_token and obj.ntfy_token.strip())
+
+    def get_gotify_token_configured(self, obj):
+        return bool(obj.gotify_token and obj.gotify_token.strip())
+
+    def get_webhook_url_configured(self, obj):
+        return bool(obj.webhook_url and obj.webhook_url.strip())
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -140,13 +176,98 @@ class CollectorSettingsSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Must be an object')
         return merge_notification_rules(value)
 
-    def update(self, instance, validated_data):
-        telegram_bot_token = validated_data.get('telegram_bot_token', None)
-        if telegram_bot_token == '' or telegram_bot_token is None:
-            validated_data.pop('telegram_bot_token', None)
+    def validate_quiet_hours_start(self, value):
+        return self._validate_hhmm(value, 'quiet_hours_start')
 
-        discord_webhook_url = validated_data.get('discord_webhook_url', None)
-        if discord_webhook_url == '' or discord_webhook_url is None:
-            validated_data.pop('discord_webhook_url', None)
+    def validate_quiet_hours_end(self, value):
+        return self._validate_hhmm(value, 'quiet_hours_end')
+
+    def validate_alert_repeat_minutes(self, value):
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError('Must be an integer')
+        return max(5, min(1440, n))
+
+    def validate_polling_interval_minutes(self, value):
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError('Must be an integer')
+        return max(1, min(60, n))
+
+    def validate_metrics_retention_days(self, value):
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError('Must be an integer')
+        return max(0, min(3650, n))
+
+    def validate_alert_retention_days(self, value):
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError('Must be an integer')
+        return max(0, min(3650, n))
+
+    @staticmethod
+    def _validate_hhmm(value, field_name):
+        raw = (value or '').strip()
+        try:
+            parts = raw.split(':')
+            h, m = int(parts[0]), int(parts[1])
+            if not (0 <= h <= 23 and 0 <= m <= 59):
+                raise ValueError
+            return f'{h:02d}:{m:02d}'
+        except (TypeError, ValueError, IndexError):
+            raise serializers.ValidationError(f'{field_name} must be HH:MM')
+
+    def update(self, instance, validated_data):
+        for secret in (
+            'telegram_bot_token',
+            'discord_webhook_url',
+            'ntfy_token',
+            'gotify_token',
+            'webhook_url',
+        ):
+            val = validated_data.get(secret, None)
+            if val == '' or val is None:
+                validated_data.pop(secret, None)
 
         return super().update(instance, validated_data)
+
+
+class AlertEventSerializer(serializers.ModelSerializer):
+    """Activity / alert journal entries."""
+    is_open = serializers.SerializerMethodField()
+    is_muted = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AlertEvent
+        fields = [
+            'id',
+            'event_type',
+            'severity',
+            'device',
+            'device_make',
+            'device_key',
+            'device_name',
+            'message',
+            'payload',
+            'fingerprint',
+            'created_at',
+            'acknowledged_at',
+            'resolved_at',
+            'muted_until',
+            'last_notified_at',
+            'is_open',
+            'is_muted',
+        ]
+        read_only_fields = fields
+
+    def get_is_open(self, obj):
+        return obj.is_open
+
+    def get_is_muted(self, obj):
+        return obj.is_muted
+

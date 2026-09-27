@@ -165,8 +165,86 @@ class DeviceSystemInfo(models.Model):
         return f"{self.device} System Info at {self.recorded_at}"
 
 
+class AlertEvent(models.Model):
+    """
+    Persisted activity / alert journal (control audits + collector alerts).
+
+    Shared by collectors (chat + Activity) and control actions (audit rows).
+    """
+
+    SEVERITY_INFO = 'info'
+    SEVERITY_WARN = 'warn'
+    SEVERITY_CRITICAL = 'critical'
+    SEVERITY_CHOICES = [
+        (SEVERITY_INFO, 'Info'),
+        (SEVERITY_WARN, 'Warning'),
+        (SEVERITY_CRITICAL, 'Critical'),
+    ]
+
+    event_type = models.CharField(max_length=64, db_index=True)
+    severity = models.CharField(
+        max_length=16,
+        choices=SEVERITY_CHOICES,
+        default=SEVERITY_INFO,
+        db_index=True,
+    )
+    device = models.ForeignKey(
+        Device,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='alert_events',
+    )
+    device_make = models.CharField(max_length=32, blank=True, default='')
+    device_key = models.CharField(
+        max_length=64, blank=True, default='',
+        help_text='Vendor device_id string',
+    )
+    device_name = models.CharField(max_length=100, blank=True, default='')
+    message = models.TextField()
+    payload = models.JSONField(default=dict, blank=True)
+    fingerprint = models.CharField(
+        max_length=191,
+        blank=True,
+        default='',
+        db_index=True,
+        help_text='Dedup key: event_type + device identity',
+    )
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    acknowledged_at = models.DateTimeField(blank=True, null=True)
+    resolved_at = models.DateTimeField(blank=True, null=True)
+    muted_until = models.DateTimeField(blank=True, null=True)
+    last_notified_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = 'alert_events'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['-created_at']),
+            models.Index(fields=['event_type', '-created_at']),
+            models.Index(fields=['device', '-created_at']),
+            models.Index(fields=['fingerprint', '-created_at']),
+            models.Index(fields=['resolved_at', 'acknowledged_at']),
+            models.Index(fields=['severity', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.event_type} [{self.severity}] at {self.created_at}"
+
+    @property
+    def is_open(self):
+        return self.resolved_at is None and self.acknowledged_at is None
+
+    @property
+    def is_muted(self):
+        if not self.muted_until:
+            return False
+        return self.muted_until > timezone.now()
+
+
 class PoolStats(models.Model):
     """Normalized mining pool statistics (CKPool, PublicPool, future sources)."""
+
 
     POOL_CKPOOL = 'ckpool'
     POOL_PUBLICPOOL = 'publicpool'
@@ -235,11 +313,13 @@ DEFAULT_NOTIFICATION_RULES = {
         'enabled': True,
         'label': 'Device offline',
         'description': 'Alert when a device becomes unreachable',
+        'severity': 'critical',
     },
     'device_online': {
         'enabled': True,
         'label': 'Device back online',
         'description': 'Alert when a previously offline device recovers',
+        'severity': 'info',
     },
     'hashrate_stagnation': {
         'enabled': True,
@@ -247,19 +327,58 @@ DEFAULT_NOTIFICATION_RULES = {
         'description': 'Alert when hashrate stays flat across multiple polls',
         'threshold_collections': 3,
         'tolerance_ghs': 0.1,
+        'severity': 'warn',
     },
     'auto_restart': {
         'enabled': True,
         'label': 'Auto-restart on stagnation',
         'description': 'Attempt remote restart when hashrate stagnation is detected',
+        'severity': 'warn',
     },
     'best_difficulty': {
         'enabled': True,
         'label': 'New best difficulty',
         'description': 'Celebrate personal best share difficulty improvements',
         'min_improvement_percent': 5.0,
+        'severity': 'info',
+    },
+    'temperature_high': {
+        'enabled': True,
+        'label': 'High temperature',
+        'description': 'Alert when device temperature stays above threshold across polls',
+        'threshold_c': 80.0,
+        'duration_polls': 2,
+        'severity': 'critical',
+    },
+    'fan_dead': {
+        'enabled': True,
+        'label': 'Fan not spinning',
+        'description': 'Alert when fan RPM is ~0 while the device is hashing',
+        'severity': 'critical',
+    },
+    'pool_down': {
+        'enabled': True,
+        'label': 'Pool stats unavailable',
+        'description': 'Alert when pool API fails or no fresh pool stats arrive',
+        'stale_minutes': 30,
+        'severity': 'warn',
+    },
+    'collector_down': {
+        'enabled': True,
+        'label': 'Collector unhealthy',
+        'description': 'Alert when the data collector fails or stops reporting',
+        'severity': 'critical',
+    },
+    'expected_hashrate_drop': {
+        'enabled': True,
+        'label': 'Hashrate below expected',
+        'description': 'Alert when live hashrate falls below expected by a configured percent',
+        'drop_percent': 30.0,
+        'severity': 'warn',
     },
 }
+
+_SEVERITY_CHOICES = {'info', 'warn', 'critical'}
 
 
 def merge_notification_rules(raw):
@@ -272,6 +391,8 @@ def merge_notification_rules(raw):
         if isinstance(user, dict):
             if 'enabled' in user:
                 entry['enabled'] = bool(user['enabled'])
+            if 'severity' in user and user['severity'] in _SEVERITY_CHOICES:
+                entry['severity'] = user['severity']
             if key == 'hashrate_stagnation':
                 try:
                     n = int(user.get('threshold_collections', entry['threshold_collections']))
@@ -287,6 +408,29 @@ def merge_notification_rules(raw):
                 try:
                     p = float(user.get('min_improvement_percent', entry['min_improvement_percent']))
                     entry['min_improvement_percent'] = max(0.0, min(100.0, p))
+                except (TypeError, ValueError):
+                    pass
+            if key == 'temperature_high':
+                try:
+                    t = float(user.get('threshold_c', entry['threshold_c']))
+                    entry['threshold_c'] = max(40.0, min(120.0, t))
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    n = int(user.get('duration_polls', entry['duration_polls']))
+                    entry['duration_polls'] = max(1, min(20, n))
+                except (TypeError, ValueError):
+                    pass
+            if key == 'pool_down':
+                try:
+                    n = int(user.get('stale_minutes', entry['stale_minutes']))
+                    entry['stale_minutes'] = max(5, min(1440, n))
+                except (TypeError, ValueError):
+                    pass
+            if key == 'expected_hashrate_drop':
+                try:
+                    p = float(user.get('drop_percent', entry['drop_percent']))
+                    entry['drop_percent'] = max(5.0, min(95.0, p))
                 except (TypeError, ValueError):
                     pass
         merged[key] = entry
@@ -306,9 +450,9 @@ class CollectorSettings(models.Model):
         ('parasite', 'Parasite'),
     ]
 
-    # Polling configuration
+    # Polling configuration (home fleets: ~1–2 min default)
     polling_interval_minutes = models.IntegerField(
-        default=15,
+        default=2,
         help_text="How often to poll devices for data (in minutes)"
     )
     device_check_interval_minutes = models.IntegerField(
@@ -393,11 +537,85 @@ class CollectorSettings(models.Model):
         help_text="Discord webhook URL for alerts (create in Discord channel settings)"
     )
 
+    # ntfy / Gotify / generic webhook (Umbrel-friendly push channels)
+    ntfy_enabled = models.BooleanField(
+        default=False,
+        help_text="Enable ntfy push notifications (topic URL)",
+    )
+    ntfy_url = models.CharField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text="Full ntfy topic URL (e.g. https://ntfy.sh/mytopic or self-hosted)",
+    )
+    ntfy_token = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="Optional ntfy access token",
+    )
+    gotify_enabled = models.BooleanField(
+        default=False,
+        help_text="Enable Gotify push notifications",
+    )
+    gotify_url = models.CharField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text="Gotify server base URL (e.g. https://gotify.example.com)",
+    )
+    gotify_token = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text="Gotify application token",
+    )
+    webhook_enabled = models.BooleanField(
+        default=False,
+        help_text="Enable generic JSON webhook for alerts",
+    )
+    webhook_url = models.CharField(
+        max_length=500,
+        blank=True,
+        default='',
+        help_text="POST JSON alerts to this URL",
+    )
+
     # Per-event notification rules (enable/disable + thresholds). See DEFAULT_NOTIFICATION_RULES.
     notification_rules = models.JSONField(
         default=dict,
         blank=True,
         help_text="Alert type toggles and tuning (offline, online, stagnation, restart, best difficulty)",
+    )
+
+    # Quiet hours + re-alert cadence (non-critical suppressed during quiet window)
+    quiet_hours_enabled = models.BooleanField(
+        default=False,
+        help_text="When enabled, info/warn alerts skip chat during quiet hours (critical still delivered)",
+    )
+    quiet_hours_start = models.CharField(
+        max_length=5,
+        default='22:00',
+        help_text="Quiet hours start (HH:MM, local server time)",
+    )
+    quiet_hours_end = models.CharField(
+        max_length=5,
+        default='07:00',
+        help_text="Quiet hours end (HH:MM, local server time)",
+    )
+    alert_repeat_minutes = models.IntegerField(
+        default=60,
+        help_text="Minutes before re-notifying the same open problem via chat",
+    )
+
+    # Retention (0 = keep forever for that category)
+    metrics_retention_days = models.IntegerField(
+        default=90,
+        help_text="Days to keep device_*_stats and pool_stats (0 = forever)",
+    )
+    alert_retention_days = models.IntegerField(
+        default=0,
+        help_text="Days to keep resolved AlertEvents (0 = forever; open alerts never pruned)",
     )
 
     # Cost Analysis Settings

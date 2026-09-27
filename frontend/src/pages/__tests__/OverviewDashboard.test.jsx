@@ -79,6 +79,21 @@ function renderWithProviders(ui) {
     if (url.includes('/api/overview/analytics/')) {
       return Promise.resolve({ data: mockAnalytics })
     }
+    if (url.includes('/api/activity/')) {
+      return Promise.resolve({
+        data: { results: [], open_count: 0, critical_open_count: 0 },
+      })
+    }
+    if (url.includes('/api/settings/collector/status/')) {
+      return Promise.resolve({
+        data: {
+          reachable: true,
+          status: 'healthy',
+          next_run: null,
+          last_success_at: new Date().toISOString(),
+        },
+      })
+    }
     return Promise.resolve({ data: {} })
   })
 

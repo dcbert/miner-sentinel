@@ -267,6 +267,79 @@ class DiscordNotifier:
         }
         return self.send_embed(embed)
 
+    def send_temperature_alert(
+        self, device_id: str, device_name: str, temperature_c: float, threshold_c: float, duration_polls: int
+    ):
+        embed = {
+            "title": "🌡️ High Temperature",
+            "description": "Device temperature stayed above threshold across recent polls.",
+            "color": self.COLOR_ALERT,
+            "fields": [
+                {"name": "Device", "value": f"**{device_name}** (`{device_id}`)", "inline": True},
+                {"name": "Temperature", "value": f"{temperature_c:.0f}°C", "inline": True},
+                {"name": "Threshold", "value": f"{threshold_c:.0f}°C × {duration_polls} polls", "inline": True},
+            ],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "footer": {"text": "MinerSentinel"},
+        }
+        return self.send_embed(embed)
+
+    def send_fan_dead_alert(self, device_id: str, device_name: str, fan_rpm: int, hashrate: float):
+        embed = {
+            "title": "🌀 Fan Not Spinning",
+            "description": "Fan RPM is near zero while the device is hashing.",
+            "color": self.COLOR_ALERT,
+            "fields": [
+                {"name": "Device", "value": f"**{device_name}** (`{device_id}`)", "inline": True},
+                {"name": "Fan RPM", "value": str(fan_rpm), "inline": True},
+                {"name": "Hashrate", "value": f"{hashrate:.2f} GH/s", "inline": True},
+            ],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "footer": {"text": "MinerSentinel"},
+        }
+        return self.send_embed(embed)
+
+    def send_expected_hashrate_alert(
+        self, device_id: str, device_name: str, current: float, expected: float, drop_percent: float
+    ):
+        embed = {
+            "title": "📉 Hashrate Below Expected",
+            "description": "Live hashrate fell below the device expected hashrate.",
+            "color": self.COLOR_ALERT,
+            "fields": [
+                {"name": "Device", "value": f"**{device_name}** (`{device_id}`)", "inline": True},
+                {"name": "Current", "value": f"{current:.2f} GH/s", "inline": True},
+                {"name": "Expected", "value": f"{expected:.2f} GH/s", "inline": True},
+                {"name": "Drop", "value": f"{drop_percent:.0f}%", "inline": True},
+            ],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "footer": {"text": "MinerSentinel"},
+        }
+        return self.send_embed(embed)
+
+    def send_pool_down_alert(self, pool_type: str, detail: str):
+        embed = {
+            "title": "🏊 Pool Stats Unavailable",
+            "description": str(detail)[:300] or "Pool collector failed or stats are stale.",
+            "color": self.COLOR_ALERT,
+            "fields": [
+                {"name": "Pool", "value": str(pool_type or 'pool'), "inline": True},
+            ],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "footer": {"text": "MinerSentinel"},
+        }
+        return self.send_embed(embed)
+
+    def send_collector_down_alert(self, detail: str):
+        embed = {
+            "title": "🛑 Collector Unhealthy",
+            "description": str(detail)[:400] or "Data collection cycle reported errors.",
+            "color": self.COLOR_ALERT,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "footer": {"text": "MinerSentinel"},
+        }
+        return self.send_embed(embed)
+
     def _format_difficulty(self, difficulty: float) -> str:
         """Format difficulty value with appropriate unit (same as Telegram)."""
         if difficulty >= 1e12:

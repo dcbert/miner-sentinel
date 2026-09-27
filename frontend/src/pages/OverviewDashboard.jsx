@@ -22,15 +22,23 @@ import HealthBar from '@/components/metrics/HealthBar'
 import MetricCard from '@/components/metrics/MetricCard'
 import StatusIndicator from '@/components/status/StatusIndicator'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  getEventMeta,
+  isHighlightEvent,
+  isProblemEvent,
+} from '@/lib/activity'
 import api from '@/lib/api'
 import { makeLabel } from '@/lib/devices'
 import { useTimeRange } from '@/lib/TimeRangeContext'
 import { formatRangeWindow, toAnalyticsParams } from '@/lib/timeRange'
 import {
   Activity,
+  AlertTriangle,
   Award,
   Battery,
+  Bell,
   CheckCircle2,
   Cpu,
   Flame,
@@ -48,14 +56,45 @@ export default function OverviewDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [updatedAt, setUpdatedAt] = useState(null)
+  const [openAlerts, setOpenAlerts] = useState([])
+  const [openCount, setOpenCount] = useState(0)
+  const [criticalCount, setCriticalCount] = useState(0)
+  const [recentHighlights, setRecentHighlights] = useState([])
+  const [collectorHealth, setCollectorHealth] = useState(null)
+  const [incidentMarkers, setIncidentMarkers] = useState([])
 
   const fetchAnalytics = useCallback(async () => {
     try {
       setError(null)
-      const response = await api.get('/api/overview/analytics/', {
-        params: toAnalyticsParams(range),
-      })
-      setAnalytics(response.data)
+      const [analyticsRes, activityRes, highlightsRes, statusRes, markersRes] = await Promise.all([
+        api.get('/api/overview/analytics/', { params: toAnalyticsParams(range) }),
+        api.get('/api/activity/', { params: { open: 'true', kind: 'problem', limit: 8 } }).catch(() => ({ data: null })),
+        api.get('/api/activity/', { params: { open: 'false', kind: 'highlight', limit: 5 } }).catch(() => ({ data: null })),
+        api.get('/api/settings/collector/status/').catch(() => ({ data: null })),
+        api
+          .get('/api/activity/', {
+            params: {
+              open: 'false',
+              kind: 'all',
+              limit: 40,
+              since: range.from?.toISOString?.() || undefined,
+            },
+          })
+          .catch(() => ({ data: null })),
+      ])
+      setAnalytics(analyticsRes.data)
+      const problems = (activityRes.data?.results || []).filter(isProblemEvent)
+      setOpenAlerts(problems)
+      setOpenCount(activityRes.data?.open_count ?? problems.length)
+      setCriticalCount(activityRes.data?.critical_open_count ?? 0)
+      setRecentHighlights((highlightsRes.data?.results || []).filter(isHighlightEvent).slice(0, 3))
+      setCollectorHealth(statusRes.data)
+      const markerEvents = (markersRes.data?.results || []).filter((e) =>
+        ['device_offline', 'auto_restart', 'best_difficulty', 'collector_down', 'temperature_high'].includes(
+          e.event_type,
+        ),
+      )
+      setIncidentMarkers(markerEvents)
       setUpdatedAt(new Date())
     } catch (err) {
       console.error('Error fetching analytics:', err)
@@ -70,9 +109,11 @@ export default function OverviewDashboard() {
   useEffect(() => {
     setLoading(true)
     fetchAnalytics()
-    const interval = setInterval(fetchAnalytics, 120000)
+    // Faster UI poll when criticals are open (60s), else 2 min
+    const intervalMs = criticalCount > 0 ? 60000 : 120000
+    const interval = setInterval(fetchAnalytics, intervalMs)
     return () => clearInterval(interval)
-  }, [fetchAnalytics])
+  }, [fetchAnalytics, criticalCount])
 
   if (loading && !analytics) {
     return <DashboardSkeleton />
@@ -217,6 +258,98 @@ export default function OverviewDashboard() {
         <DataFreshness updatedAt={updatedAt} live />
       </div>
 
+      {/* Issues needing attention */}
+      {(openCount > 0 || offlineCount > 0 || (collectorHealth && collectorHealth.reachable === false)) && (
+        <div
+          className={`rounded-xl border px-4 py-3 ${
+            criticalCount > 0
+              ? 'border-red-500/30 bg-red-500/5'
+              : 'border-amber-500/30 bg-amber-500/5'
+          }`}
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex gap-3">
+              <AlertTriangle
+                className={`mt-0.5 h-5 w-5 shrink-0 ${
+                  criticalCount > 0 ? 'text-red-500' : 'text-amber-500'
+                }`}
+              />
+              <div className="space-y-1">
+                <p className="text-sm font-medium">
+                  {criticalCount > 0
+                    ? `${criticalCount} critical · ${openCount} needing attention`
+                    : openCount > 0
+                      ? `${openCount} issue${openCount === 1 ? '' : 's'} needing attention`
+                      : offlineCount > 0
+                        ? `${offlineCount} device${offlineCount === 1 ? '' : 's'} offline`
+                        : 'Collector unreachable'}
+                </p>
+                {collectorHealth && collectorHealth.reachable === false && (
+                  <p className="text-xs text-muted-foreground">
+                    Data collector is not responding — check Docker / Settings → Collector.
+                  </p>
+                )}
+                {collectorHealth?.reachable && collectorHealth.status === 'degraded' && (
+                  <p className="text-xs text-muted-foreground">
+                    Collector last cycle had errors
+                    {collectorHealth.last_error ? `: ${collectorHealth.last_error}` : ''}.
+                  </p>
+                )}
+                <ul className="space-y-1">
+                  {openAlerts.slice(0, 5).map((ev) => {
+                    const meta = getEventMeta(ev.event_type)
+                    return (
+                      <li key={ev.id} className="text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground/80">{ev.message}</span>
+                        <span className="text-muted-foreground/70"> · {meta.label}</span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => navigate('/activity')}>
+                <Bell className="mr-1.5 h-3.5 w-3.5" />
+                Activity
+              </Button>
+              {offlineCount > 0 && (
+                <Button size="sm" variant="outline" onClick={() => navigate('/mining')}>
+                  View devices
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Recent highlights (records / recoveries) — never framed as problems */}
+      {recentHighlights.length > 0 && (
+        <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex gap-3">
+              <Award className="mt-0.5 h-5 w-5 shrink-0 text-emerald-500" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-emerald-800 dark:text-emerald-300">
+                  Recent highlight{recentHighlights.length === 1 ? '' : 's'}
+                </p>
+                <ul className="space-y-1">
+                  {recentHighlights.map((ev) => (
+                    <li key={ev.id} className="text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground/85">{ev.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => navigate('/activity')}>
+              <Award className="mr-1.5 h-3.5 w-3.5" />
+              Highlights
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Hero KPIs — equal weight row */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
         <MetricCard
@@ -283,6 +416,7 @@ export default function OverviewDashboard() {
                 formatAxisShares={formatAxisShares}
                 formatHashrate={formatHashrate}
                 formatShares={formatShares}
+                incidents={incidentMarkers}
               />
             </div>
           </CardContent>

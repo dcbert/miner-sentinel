@@ -16,11 +16,16 @@ import {
   CheckCircle2,
   Edit,
   EyeOff,
+  Fan,
   Loader2,
   MessageCircle,
+  Moon,
   Power,
   RefreshCw,
   Send,
+  Server,
+  Thermometer,
+  TrendingDown,
   Wifi,
   WifiOff,
 } from 'lucide-react'
@@ -52,13 +57,43 @@ const ALERT_META = {
     accent: 'text-yellow-500',
     bg: 'bg-yellow-500/10',
   },
+  temperature_high: {
+    icon: Thermometer,
+    accent: 'text-red-500',
+    bg: 'bg-red-500/10',
+  },
+  fan_dead: {
+    icon: Fan,
+    accent: 'text-orange-500',
+    bg: 'bg-orange-500/10',
+  },
+  pool_down: {
+    icon: Server,
+    accent: 'text-amber-500',
+    bg: 'bg-amber-500/10',
+  },
+  collector_down: {
+    icon: Server,
+    accent: 'text-red-500',
+    bg: 'bg-red-500/10',
+  },
+  expected_hashrate_drop: {
+    icon: TrendingDown,
+    accent: 'text-amber-500',
+    bg: 'bg-amber-500/10',
+  },
 }
 
 const ALERT_ORDER = [
   'device_offline',
   'device_online',
+  'temperature_high',
+  'fan_dead',
+  'expected_hashrate_drop',
   'hashrate_stagnation',
   'auto_restart',
+  'pool_down',
+  'collector_down',
   'best_difficulty',
 ]
 
@@ -70,8 +105,11 @@ export default function NotificationsSettings({
 }) {
   const [showTelegramToken, setShowTelegramToken] = useState(false)
   const [showDiscordWebhook, setShowDiscordWebhook] = useState(false)
-  const [testing, setTesting] = useState(null) // 'telegram' | 'discord'
+  const [testing, setTesting] = useState(null) // 'telegram' | 'discord' | 'ntfy' | 'gotify' | 'webhook'
   const [testResult, setTestResult] = useState(null)
+  const [showNtfyToken, setShowNtfyToken] = useState(false)
+  const [showGotifyToken, setShowGotifyToken] = useState(false)
+  const [showWebhookUrl, setShowWebhookUrl] = useState(false)
 
   const rules = settings.notification_rules || {}
 
@@ -88,7 +126,21 @@ export default function NotificationsSettings({
     const dc =
       settings.discord_enabled &&
       (settings.discord_webhook_url_configured || settings.discord_webhook_url)
-    return { telegram: !!tg, discord: !!dc }
+    const ntfy = settings.ntfy_enabled && !!(settings.ntfy_url || '').trim()
+    const gotify =
+      settings.gotify_enabled &&
+      !!(settings.gotify_url || '').trim() &&
+      (settings.gotify_token_configured || settings.gotify_token)
+    const webhook =
+      settings.webhook_enabled &&
+      (settings.webhook_url_configured || settings.webhook_url)
+    return {
+      telegram: !!tg,
+      discord: !!dc,
+      ntfy: !!ntfy,
+      gotify: !!gotify,
+      webhook: !!webhook,
+    }
   }, [settings])
 
   const updateRule = (key, patch) => {
@@ -108,21 +160,33 @@ export default function NotificationsSettings({
     setTesting(channel)
     setTestResult(null)
     try {
-      const path =
-        channel === 'telegram'
-          ? '/api/settings/collector/test-telegram/'
-          : '/api/settings/collector/test-discord/'
-      const body =
-        channel === 'telegram'
-          ? {
-              force: true,
-              telegram_bot_token: settings.telegram_bot_token || undefined,
-              telegram_chat_id: settings.telegram_chat_id || undefined,
-            }
-          : {
-              force: true,
-              discord_webhook_url: settings.discord_webhook_url || undefined,
-            }
+      let path
+      let body = { force: true }
+      if (channel === 'telegram') {
+        path = '/api/settings/collector/test-telegram/'
+        body = {
+          force: true,
+          telegram_bot_token: settings.telegram_bot_token || undefined,
+          telegram_chat_id: settings.telegram_chat_id || undefined,
+        }
+      } else if (channel === 'discord') {
+        path = '/api/settings/collector/test-discord/'
+        body = {
+          force: true,
+          discord_webhook_url: settings.discord_webhook_url || undefined,
+        }
+      } else {
+        path = '/api/settings/collector/test-push/'
+        body = {
+          force: true,
+          channel,
+          ntfy_url: settings.ntfy_url || undefined,
+          ntfy_token: settings.ntfy_token || undefined,
+          gotify_url: settings.gotify_url || undefined,
+          gotify_token: settings.gotify_token || undefined,
+          webhook_url: settings.webhook_url || undefined,
+        }
+      }
       const res = await api.post(path, body)
       setTestResult({
         ok: true,
@@ -142,6 +206,15 @@ export default function NotificationsSettings({
       setTesting(null)
     }
   }
+
+  const channelLabel = (ch) =>
+    ({
+      telegram: 'Telegram',
+      discord: 'Discord',
+      ntfy: 'ntfy',
+      gotify: 'Gotify',
+      webhook: 'Webhook',
+    }[ch] || ch)
 
   return (
     <div className="space-y-6">
@@ -185,6 +258,16 @@ export default function NotificationsSettings({
               >
                 Discord {channelsReady.discord ? 'ready' : 'off'}
               </Badge>
+              <Badge
+                variant="outline"
+                className={
+                  channelsReady.ntfy
+                    ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+                    : 'text-muted-foreground'
+                }
+              >
+                ntfy {channelsReady.ntfy ? 'ready' : 'off'}
+              </Badge>
             </div>
           </div>
         </CardContent>
@@ -198,7 +281,7 @@ export default function NotificationsSettings({
             <AlertTriangle className="h-4 w-4" />
           )}
           <AlertDescription>
-            {testResult.channel === 'telegram' ? 'Telegram' : 'Discord'}: {testResult.message}
+            {channelLabel(testResult.channel)}: {testResult.message}
           </AlertDescription>
         </Alert>
       )}
@@ -406,6 +489,270 @@ export default function NotificationsSettings({
         </Card>
       </div>
 
+      {/* ntfy / Gotify / webhook */}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="overflow-hidden">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-emerald-500/10">
+                  <Bell className="h-4 w-4 text-emerald-500" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">ntfy</CardTitle>
+                  <CardDescription className="text-xs">Topic URL push (Umbrel-friendly)</CardDescription>
+                </div>
+              </div>
+              <Switch
+                checked={!!settings.ntfy_enabled}
+                onCheckedChange={(checked) =>
+                  setSettings({ ...settings, ntfy_enabled: checked })
+                }
+                aria-label="Enable ntfy"
+              />
+            </div>
+          </CardHeader>
+          <CardContent className={`space-y-3 ${settings.ntfy_enabled ? '' : 'opacity-50 pointer-events-none'}`}>
+            <div className="space-y-1.5">
+              <Label htmlFor="ntfy-url">Topic URL</Label>
+              <Input
+                id="ntfy-url"
+                placeholder="https://ntfy.sh/mytopic"
+                value={settings.ntfy_url || ''}
+                onChange={(e) => setSettings({ ...settings, ntfy_url: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ntfy-token">Access token (optional)</Label>
+              {settings.ntfy_token_configured && !showNtfyToken ? (
+                <div className="flex gap-2">
+                  <div className="flex-1 flex items-center px-3 py-2 rounded-md border bg-muted/40 text-sm">
+                    <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/20">
+                      Configured
+                    </Badge>
+                  </div>
+                  <Button type="button" variant="outline" size="icon" onClick={() => setShowNtfyToken(true)}>
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <Input
+                  id="ntfy-token"
+                  type="password"
+                  autoComplete="off"
+                  value={settings.ntfy_token || ''}
+                  onChange={(e) => setSettings({ ...settings, ntfy_token: e.target.value })}
+                />
+              )}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={testing === 'ntfy'}
+              onClick={() => runTest('ntfy')}
+            >
+              {testing === 'ntfy' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+              Send test
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-hidden">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-amber-500/10">
+                  <Server className="h-4 w-4 text-amber-500" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Gotify</CardTitle>
+                  <CardDescription className="text-xs">Self-hosted push server</CardDescription>
+                </div>
+              </div>
+              <Switch
+                checked={!!settings.gotify_enabled}
+                onCheckedChange={(checked) =>
+                  setSettings({ ...settings, gotify_enabled: checked })
+                }
+                aria-label="Enable Gotify"
+              />
+            </div>
+          </CardHeader>
+          <CardContent className={`space-y-3 ${settings.gotify_enabled ? '' : 'opacity-50 pointer-events-none'}`}>
+            <div className="space-y-1.5">
+              <Label htmlFor="gotify-url">Server URL</Label>
+              <Input
+                id="gotify-url"
+                placeholder="https://gotify.example.com"
+                value={settings.gotify_url || ''}
+                onChange={(e) => setSettings({ ...settings, gotify_url: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="gotify-token">App token</Label>
+              {settings.gotify_token_configured && !showGotifyToken ? (
+                <div className="flex gap-2">
+                  <div className="flex-1 flex items-center px-3 py-2 rounded-md border bg-muted/40 text-sm">
+                    <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/20">
+                      Configured
+                    </Badge>
+                  </div>
+                  <Button type="button" variant="outline" size="icon" onClick={() => setShowGotifyToken(true)}>
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <Input
+                  id="gotify-token"
+                  type="password"
+                  autoComplete="off"
+                  value={settings.gotify_token || ''}
+                  onChange={(e) => setSettings({ ...settings, gotify_token: e.target.value })}
+                />
+              )}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={testing === 'gotify'}
+              onClick={() => runTest('gotify')}
+            >
+              {testing === 'gotify' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+              Send test
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-hidden">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-slate-500/10">
+                  <Send className="h-4 w-4 text-slate-500" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Webhook</CardTitle>
+                  <CardDescription className="text-xs">Generic JSON POST</CardDescription>
+                </div>
+              </div>
+              <Switch
+                checked={!!settings.webhook_enabled}
+                onCheckedChange={(checked) =>
+                  setSettings({ ...settings, webhook_enabled: checked })
+                }
+                aria-label="Enable webhook"
+              />
+            </div>
+          </CardHeader>
+          <CardContent className={`space-y-3 ${settings.webhook_enabled ? '' : 'opacity-50 pointer-events-none'}`}>
+            <div className="space-y-1.5">
+              <Label htmlFor="webhook-url">Webhook URL</Label>
+              {settings.webhook_url_configured && !showWebhookUrl ? (
+                <div className="flex gap-2">
+                  <div className="flex-1 flex items-center px-3 py-2 rounded-md border bg-muted/40 text-sm">
+                    <Badge variant="outline" className="bg-green-500/10 text-green-600 border-green-500/20">
+                      Configured
+                    </Badge>
+                  </div>
+                  <Button type="button" variant="outline" size="icon" onClick={() => setShowWebhookUrl(true)}>
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : (
+                <Input
+                  id="webhook-url"
+                  type="password"
+                  autoComplete="off"
+                  placeholder="https://hooks.example.com/..."
+                  value={settings.webhook_url || ''}
+                  onChange={(e) => setSettings({ ...settings, webhook_url: e.target.value })}
+                />
+              )}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={testing === 'webhook'}
+              onClick={() => runTest('webhook')}
+            >
+              {testing === 'webhook' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+              Send test
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Quiet hours + cadence */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-lg bg-violet-500/10">
+              <Moon className="h-4 w-4 text-violet-500" />
+            </div>
+            <div>
+              <CardTitle className="text-base">Quiet hours & re-alert</CardTitle>
+              <CardDescription className="text-xs">
+                Suppress info/warn chat during quiet hours. Critical alerts always deliver.
+              </CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="quiet-hours">Enable quiet hours</Label>
+            <Switch
+              id="quiet-hours"
+              checked={!!settings.quiet_hours_enabled}
+              onCheckedChange={(checked) =>
+                setSettings({ ...settings, quiet_hours_enabled: checked })
+              }
+            />
+          </div>
+          <div
+            className={`grid gap-3 sm:grid-cols-3 ${settings.quiet_hours_enabled ? '' : 'opacity-50'}`}
+          >
+            <div className="space-y-1.5">
+              <Label className="text-xs">Start (HH:MM)</Label>
+              <Input
+                value={settings.quiet_hours_start || '22:00'}
+                disabled={!settings.quiet_hours_enabled}
+                onChange={(e) =>
+                  setSettings({ ...settings, quiet_hours_start: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">End (HH:MM)</Label>
+              <Input
+                value={settings.quiet_hours_end || '07:00'}
+                disabled={!settings.quiet_hours_enabled}
+                onChange={(e) =>
+                  setSettings({ ...settings, quiet_hours_end: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Re-alert (minutes)</Label>
+              <Input
+                type="number"
+                min={5}
+                max={1440}
+                value={settings.alert_repeat_minutes ?? 60}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    alert_repeat_minutes: parseInt(e.target.value, 10) || 60,
+                  })
+                }
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Alert rules */}
       <Card>
         <CardHeader>
@@ -512,6 +859,73 @@ export default function NotificationsSettings({
                     <p className="text-[10px] text-muted-foreground">
                       Only notify when best difficulty rises by at least this percent
                     </p>
+                  </div>
+                )}
+
+                {key === 'temperature_high' && rule.enabled && (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 pl-0 sm:pl-11">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Threshold (°C)</Label>
+                      <Input
+                        type="number"
+                        min={40}
+                        max={120}
+                        value={rule.threshold_c ?? 80}
+                        onChange={(e) =>
+                          updateRule(key, {
+                            threshold_c: parseFloat(e.target.value) || 80,
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Duration (polls)</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={rule.duration_polls ?? 2}
+                        onChange={(e) =>
+                          updateRule(key, {
+                            duration_polls: parseInt(e.target.value, 10) || 2,
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {key === 'expected_hashrate_drop' && rule.enabled && (
+                  <div className="mt-4 max-w-xs pl-0 sm:pl-11 space-y-1.5">
+                    <Label className="text-xs">Drop percent vs expected</Label>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={95}
+                      value={rule.drop_percent ?? 30}
+                      onChange={(e) =>
+                        updateRule(key, {
+                          drop_percent: parseFloat(e.target.value) || 30,
+                        })
+                      }
+                    />
+                  </div>
+                )}
+
+                {key === 'pool_down' && rule.enabled && (
+                  <div className="mt-4 max-w-xs pl-0 sm:pl-11 space-y-1.5">
+                    <Label className="text-xs">Stale after (minutes)</Label>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={1440}
+                      value={rule.stale_minutes ?? 30}
+                      onChange={(e) =>
+                        updateRule(key, {
+                          stale_minutes: parseInt(e.target.value, 10) || 30,
+                        })
+                      }
+                    />
                   </div>
                 )}
 

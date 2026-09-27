@@ -151,6 +151,56 @@ class TelegramNotifier:
 
         return self.send_message(message)
 
+    def send_temperature_alert(
+        self, device_id: str, device_name: str, temperature_c: float, threshold_c: float, duration_polls: int
+    ):
+        message = (
+            f"🌡️ <b>High Temperature</b>\n\n"
+            f"<b>Device:</b> {html.escape(device_name)} ({html.escape(device_id)})\n"
+            f"<b>Temperature:</b> {temperature_c:.0f}°C\n"
+            f"<b>Threshold:</b> {threshold_c:.0f}°C for {duration_polls} polls\n\n"
+            f"⚠️ Check cooling / airflow"
+        )
+        return self.send_message(message)
+
+    def send_fan_dead_alert(self, device_id: str, device_name: str, fan_rpm: int, hashrate: float):
+        message = (
+            f"🌀 <b>Fan Not Spinning</b>\n\n"
+            f"<b>Device:</b> {html.escape(device_name)} ({html.escape(device_id)})\n"
+            f"<b>Fan RPM:</b> {fan_rpm}\n"
+            f"<b>Hashrate:</b> {hashrate:.2f} GH/s\n\n"
+            f"⚠️ Device is hashing with little/no fan airflow"
+        )
+        return self.send_message(message)
+
+    def send_expected_hashrate_alert(
+        self, device_id: str, device_name: str, current: float, expected: float, drop_percent: float
+    ):
+        message = (
+            f"📉 <b>Hashrate Below Expected</b>\n\n"
+            f"<b>Device:</b> {html.escape(device_name)} ({html.escape(device_id)})\n"
+            f"<b>Current:</b> {current:.2f} GH/s\n"
+            f"<b>Expected:</b> {expected:.2f} GH/s\n"
+            f"<b>Drop:</b> {drop_percent:.0f}%\n"
+        )
+        return self.send_message(message)
+
+    def send_pool_down_alert(self, pool_type: str, detail: str):
+        message = (
+            f"🏊 <b>Pool Stats Unavailable</b>\n\n"
+            f"<b>Pool:</b> {html.escape(str(pool_type))}\n"
+            f"<b>Detail:</b> {html.escape(str(detail)[:300])}\n"
+        )
+        return self.send_message(message)
+
+    def send_collector_down_alert(self, detail: str):
+        message = (
+            f"🛑 <b>Collector Unhealthy</b>\n\n"
+            f"<b>Detail:</b> {html.escape(str(detail)[:400])}\n\n"
+            f"⚠️ Data collection cycle reported errors"
+        )
+        return self.send_message(message)
+
     def _format_difficulty(self, difficulty: float) -> str:
         """Format difficulty value with appropriate unit."""
         if difficulty >= 1e12:

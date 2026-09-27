@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from .models import (
+    AlertEvent,
     CollectorSettings,
     Device,
     DeviceHardwareStats,
@@ -16,6 +17,18 @@ class DeviceAdmin(admin.ModelAdmin):
     list_filter = ('make', 'protocol', 'is_active')
     search_fields = ('device_id', 'name', 'ip_address')
     readonly_fields = ('created_at',)
+
+
+@admin.register(AlertEvent)
+class AlertEventAdmin(admin.ModelAdmin):
+    list_display = (
+        'event_type', 'severity', 'device_name', 'device_make', 'created_at',
+        'acknowledged_at', 'resolved_at', 'muted_until',
+    )
+    list_filter = ('severity', 'event_type', 'device_make')
+    search_fields = ('message', 'device_name', 'device_key', 'fingerprint')
+    readonly_fields = ('created_at', 'last_notified_at')
+    date_hierarchy = 'created_at'
 
 
 @admin.register(DeviceMiningStats)

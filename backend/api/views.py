@@ -12,6 +12,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from .models import (
+    AlertEvent,
     CollectorSettings,
     Device,
     DeviceHardwareStats,
@@ -20,6 +21,7 @@ from .models import (
     PoolStats,
 )
 from .serializers import (
+    AlertEventSerializer,
     CollectorSettingsSerializer,
     DeviceSerializer,
     DeviceWriteSerializer,
@@ -670,6 +672,765 @@ def test_discord_notification(request):
             {'success': False, 'error': str(e)},
             status=status.HTTP_502_BAD_GATEWAY,
         )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def test_push_notification(request):
+    """Send a test message via ntfy / Gotify / generic webhook using stored settings."""
+    import requests as http_requests
+
+    settings = CollectorSettings.get_settings()
+    body = request.data or {}
+    channel = (body.get('channel') or 'auto').strip().lower()
+
+    ntfy_url = (body.get('ntfy_url') or settings.ntfy_url or '').strip()
+    ntfy_token = (body.get('ntfy_token') or settings.ntfy_token or '').strip()
+    gotify_url = (body.get('gotify_url') or settings.gotify_url or '').strip().rstrip('/')
+    gotify_token = (body.get('gotify_token') or settings.gotify_token or '').strip()
+    webhook_url = (body.get('webhook_url') or settings.webhook_url or '').strip()
+
+    ntfy_on = settings.ntfy_enabled or channel == 'ntfy' or body.get('force')
+    gotify_on = settings.gotify_enabled or channel == 'gotify' or body.get('force')
+    webhook_on = settings.webhook_enabled or channel == 'webhook' or body.get('force')
+
+    if channel == 'ntfy':
+        gotify_on = webhook_on = False
+        ntfy_on = True
+    elif channel == 'gotify':
+        ntfy_on = webhook_on = False
+        gotify_on = True
+    elif channel == 'webhook':
+        ntfy_on = gotify_on = False
+        webhook_on = True
+
+    sent = []
+    errors = []
+
+    if ntfy_on and ntfy_url:
+        try:
+            headers = {'Title': 'MinerSentinel test', 'Priority': '3', 'Tags': 'white_check_mark'}
+            if ntfy_token:
+                headers['Authorization'] = f'Bearer {ntfy_token}'
+            resp = http_requests.post(
+                ntfy_url,
+                data=b'ntfy push notifications are working correctly for MinerSentinel.',
+                headers=headers,
+                timeout=15,
+            )
+            if resp.ok:
+                sent.append('ntfy')
+            else:
+                errors.append(f'ntfy ({resp.status_code}): {resp.text[:160]}')
+        except Exception as e:
+            errors.append(f'ntfy: {e}')
+    elif channel == 'ntfy':
+        errors.append('ntfy topic URL is required')
+
+    if gotify_on and gotify_url and gotify_token:
+        try:
+            resp = http_requests.post(
+                f'{gotify_url}/message',
+                params={'token': gotify_token},
+                json={
+                    'title': 'MinerSentinel test',
+                    'message': 'Gotify notifications are working correctly for MinerSentinel.',
+                    'priority': 3,
+                },
+                timeout=15,
+            )
+            if resp.ok:
+                sent.append('gotify')
+            else:
+                errors.append(f'gotify ({resp.status_code}): {resp.text[:160]}')
+        except Exception as e:
+            errors.append(f'gotify: {e}')
+    elif channel == 'gotify':
+        errors.append('Gotify URL and token are required')
+
+    if webhook_on and webhook_url:
+        try:
+            resp = http_requests.post(
+                webhook_url,
+                json={
+                    'source': 'minersentinel',
+                    'title': 'MinerSentinel test',
+                    'message': 'Generic webhook notifications are working correctly.',
+                    'severity': 'info',
+                    'event_key': 'test',
+                },
+                timeout=15,
+            )
+            if resp.ok:
+                sent.append('webhook')
+            else:
+                errors.append(f'webhook ({resp.status_code}): {resp.text[:160]}')
+        except Exception as e:
+            errors.append(f'webhook: {e}')
+    elif channel == 'webhook':
+        errors.append('Webhook URL is required')
+
+    if not sent and not errors:
+        return Response(
+            {
+                'success': False,
+                'error': 'Enable ntfy, Gotify, or a webhook and provide a URL (or pass force=true).',
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if sent and not errors:
+        return Response({'success': True, 'message': f'Test sent via {", ".join(sent)}'})
+    if sent and errors:
+        return Response(
+            {
+                'success': True,
+                'message': f'Partial success via {", ".join(sent)}; errors: {"; ".join(errors)}',
+            }
+        )
+    return Response(
+        {'success': False, 'error': '; '.join(errors)},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Device control (MinerWatch-style) — proxies to data-service LAN adapters
+# ---------------------------------------------------------------------------
+
+CONTROL_CAPABILITIES = {
+    'bitaxe': {
+        'reboot': True, 'fan': True, 'frequency': True, 'voltage': True,
+        'pause': True, 'resume': True, 'set_pool': True, 'workmode': False,
+    },
+    'avalon': {
+        'reboot': True, 'fan': True, 'frequency': False, 'voltage': False,
+        'pause': False, 'resume': False, 'set_pool': False, 'workmode': True,
+    },
+    'nmaxe': {
+        'reboot': True, 'fan': True, 'frequency': True, 'voltage': True,
+        'pause': False, 'resume': False, 'set_pool': True, 'workmode': False,
+    },
+    'nerdnos': {
+        'reboot': False, 'fan': False, 'frequency': False, 'voltage': False,
+        'pause': False, 'resume': False, 'set_pool': False, 'workmode': False,
+    },
+}
+
+CONTROL_CONFIRM_ACTIONS = frozenset({'reboot', 'set_pool', 'workmode'})
+
+
+def _data_service_url():
+    import os
+    return os.environ.get('DATA_SERVICE_URL', 'http://data-service:5000')
+
+
+def _log_control_event(device, action, success, result=None, error=None, user=None):
+    """Persist control action to AlertEvent when the model is available."""
+    event_type_map = {
+        'reboot': 'user_reboot',
+        'fan': 'fan_changed',
+        'frequency': 'frequency_changed',
+        'voltage': 'voltage_changed',
+        'pause': 'mining_paused',
+        'resume': 'mining_resumed',
+        'set_pool': 'pool_changed',
+        'workmode': 'workmode_changed',
+    }
+    event_type = event_type_map.get(action, f'control_{action}')
+    severity = AlertEvent.SEVERITY_INFO if success else AlertEvent.SEVERITY_WARN
+    msg = (
+        f"{'OK' if success else 'FAILED'}: {action} on "
+        f"{device.name} ({device.make}:{device.device_id})"
+    )
+    if error:
+        msg = f"{msg} — {error}"
+    payload = {
+        'action': action,
+        'success': success,
+        'result': result if isinstance(result, dict) else {},
+        'error': error,
+        'user': getattr(user, 'username', None),
+    }
+    try:
+        make = getattr(device, 'make', '') or ''
+        key = getattr(device, 'device_id', '') or ''
+        AlertEvent.objects.create(
+            event_type=event_type,
+            severity=severity,
+            device=device,
+            device_make=make,
+            device_key=key,
+            device_name=getattr(device, 'name', '') or '',
+            message=msg,
+            payload=payload,
+            fingerprint=f"{event_type}:{make}:{key}"[:191],
+        )
+    except Exception as e:  # noqa: BLE001 — never fail control response on audit write
+        # Keep control path resilient if schema lags
+        logger.warning('Could not persist control AlertEvent: %s', e)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def device_capabilities(request, make, device_id):
+    """Capability-gated control map for a device."""
+    try:
+        device = Device.objects.get(make=make, device_id=device_id)
+    except Device.DoesNotExist:
+        return Response({'detail': 'Device not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    caps = dict(CONTROL_CAPABILITIES.get(device.make, {}))
+    if not caps:
+        caps = {k: False for k in (
+            'reboot', 'fan', 'frequency', 'voltage', 'pause', 'resume', 'set_pool', 'workmode',
+        )}
+
+    from .lib.devices_status import is_device_online_server
+    online = is_device_online_server(device)
+
+    return Response({
+        'make': device.make,
+        'device_id': device.device_id,
+        'offline': not online,
+        'capabilities': caps,
+        'confirm_actions': sorted(CONTROL_CONFIRM_ACTIONS),
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def device_control(request, make, device_id):
+    """
+    POST /api/devices/{make}/{device_id}/control/
+    Body: { "action": "reboot"|"fan"|..., "params": {...} }
+    """
+    import requests
+
+    try:
+        device = Device.objects.get(make=make, device_id=device_id)
+    except Device.DoesNotExist:
+        return Response({'detail': 'Device not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    body = request.data or {}
+    action = str(body.get('action') or '').strip().lower()
+    params = body.get('params') if isinstance(body.get('params'), dict) else {}
+
+    if not action:
+        return Response({'error': 'action is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    caps = CONTROL_CAPABILITIES.get(device.make, {})
+    if not caps.get(action):
+        return Response(
+            {'error': f'Action "{action}" is not supported for {device.make}'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    from .lib.devices_status import is_device_online_server
+    if not is_device_online_server(device):
+        return Response(
+            {'error': 'Device appears offline — controls are disabled'},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    try:
+        resp = requests.post(
+            f'{_data_service_url()}/control',
+            json={
+                'make': device.make,
+                'device_id': device.device_id,
+                'action': action,
+                'params': params,
+            },
+            timeout=30,
+        )
+    except requests.exceptions.RequestException as e:
+        logger.error('Control proxy failed: %s', e)
+        _log_control_event(device, action, False, error='data-service unavailable', user=request.user)
+        return Response(
+            {'error': 'Data collector service unavailable'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    try:
+        data = resp.json()
+    except Exception:  # noqa: BLE001
+        data = {'ok': False, 'error': resp.text[:300]}
+
+    success = resp.ok and data.get('ok', False)
+    _log_control_event(
+        device,
+        action,
+        success,
+        result=data if success else None,
+        error=None if success else data.get('error') or f'HTTP {resp.status_code}',
+        user=request.user,
+    )
+
+    if success:
+        return Response(data)
+    status_code = resp.status_code if resp.status_code >= 400 else status.HTTP_502_BAD_GATEWAY
+    return Response(data, status=status_code)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def discover_devices_view(request):
+    """Proxy LAN discovery to data-service."""
+    import requests
+
+    body = request.data or {}
+    try:
+        resp = requests.post(
+            f'{_data_service_url()}/discover',
+            json={
+                'cidr': body.get('cidr'),
+                'seed_ips': body.get('seed_ips'),
+            },
+            timeout=120,
+        )
+    except requests.exceptions.RequestException as e:
+        logger.error('Discovery proxy failed: %s', e)
+        return Response(
+            {'error': 'Data collector service unavailable'},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    try:
+        data = resp.json()
+    except Exception:  # noqa: BLE001
+        return Response({'error': 'Invalid discovery response'}, status=status.HTTP_502_BAD_GATEWAY)
+
+    # Annotate which discovered IPs are already registered
+    registered = {
+        (d.make, d.ip_address): d
+        for d in Device.objects.filter(is_active=True)
+    }
+    for item in data.get('devices') or []:
+        key = (item.get('make'), item.get('ip_address'))
+        existing = registered.get(key)
+        item['already_registered'] = bool(existing)
+        if existing:
+            item['registered_device_id'] = existing.device_id
+            item['registered_name'] = existing.name
+
+    return Response(data, status=resp.status_code if not resp.ok else status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def advisor_view(request):
+    """
+    Ranked next-actions with one-click control hooks where possible.
+    Lightweight Phase 3 advisor (does not replace Overview open-problems strip).
+    """
+    suggestions = []
+    now = timezone.now()
+
+    for device in Device.objects.filter(is_active=True).order_by('name'):
+        caps = CONTROL_CAPABILITIES.get(device.make, {})
+        age = None
+        if device.last_seen_at:
+            age = (now - device.last_seen_at).total_seconds()
+
+        offline = bool(device.error_message) or age is None or (age is not None and age > 600)
+        if offline and caps.get('reboot'):
+            suggestions.append({
+                'priority': 10 if age is None or age > 3600 else 20,
+                'kind': 'device_offline',
+                'title': f'{device.name} appears offline',
+                'detail': device.error_message or 'No recent successful poll',
+                'device': {'make': device.make, 'device_id': device.device_id, 'name': device.name},
+                'actions': [
+                    {
+                        'label': 'Reboot',
+                        'control': {'action': 'reboot', 'params': {}},
+                        'confirm': True,
+                    },
+                ],
+            })
+
+        latest_hw = DeviceHardwareStats.objects.filter(device=device).first()
+        if latest_hw and latest_hw.temperature_c and latest_hw.temperature_c >= 85 and caps.get('fan'):
+            suggestions.append({
+                'priority': 15,
+                'kind': 'high_temp',
+                'title': f'{device.name} at {latest_hw.temperature_c:.0f}°C',
+                'detail': 'Raise fan speed to cool the miner',
+                'device': {'make': device.make, 'device_id': device.device_id, 'name': device.name},
+                'actions': [
+                    {
+                        'label': 'Fan 100%',
+                        'control': {'action': 'fan', 'params': {'percent': 100, 'auto': False}},
+                        'confirm': False,
+                    },
+                ],
+            })
+
+        if device.make == 'avalon' and caps.get('workmode') and not offline:
+            suggestions.append({
+                'priority': 80,
+                'kind': 'avalon_workmode',
+                'title': f'{device.name}: Avalon workmode',
+                'detail': 'Switch Low / Mid / High power preset',
+                'device': {'make': device.make, 'device_id': device.device_id, 'name': device.name},
+                'actions': [
+                    {'label': 'Low', 'control': {'action': 'workmode', 'params': {'mode': 0}}, 'confirm': True},
+                    {'label': 'Mid', 'control': {'action': 'workmode', 'params': {'mode': 1}}, 'confirm': True},
+                    {'label': 'High', 'control': {'action': 'workmode', 'params': {'mode': 2}}, 'confirm': True},
+                ],
+            })
+
+    settings = CollectorSettings.get_settings()
+    if not settings.telegram_enabled and not settings.discord_enabled:
+        suggestions.append({
+            'priority': 50,
+            'kind': 'alerts_not_configured',
+            'title': 'Alerts not configured',
+            'detail': 'Enable Telegram or Discord in Settings → Notifications',
+            'device': None,
+            'actions': [],
+            'href': '/settings',
+        })
+
+    suggestions.sort(key=lambda s: s['priority'])
+    return Response({'suggestions': suggestions[:20]})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def export_inventory_csv(request):
+    """Phase 4 foundation: export device inventory (+ optional alert history) as CSV."""
+    import csv
+    from io import StringIO
+
+    from django.http import HttpResponse
+
+    include_alerts = str(request.query_params.get('alerts', 'false')).lower() == 'true'
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        'make', 'device_id', 'name', 'ip_address', 'port', 'protocol',
+        'model', 'is_active', 'last_seen_at', 'error_message',
+    ])
+    for d in Device.objects.all().order_by('make', 'name'):
+        writer.writerow([
+            d.make, d.device_id, d.name, d.ip_address, d.port or '',
+            d.protocol, d.model or '', d.is_active,
+            d.last_seen_at.isoformat() if d.last_seen_at else '',
+            (d.error_message or '').replace('\n', ' ')[:500],
+        ])
+
+    if include_alerts:
+        writer.writerow([])
+        writer.writerow(['event_type', 'severity', 'device_make', 'device_id', 'message', 'created_at', 'acknowledged_at'])
+        for ev in AlertEvent.objects.select_related('device').order_by('-created_at')[:5000]:
+            writer.writerow([
+                ev.event_type,
+                ev.severity,
+                ev.device.make if ev.device else '',
+                ev.device.device_id if ev.device else '',
+                (ev.message or '').replace('\n', ' ')[:500],
+                ev.created_at.isoformat() if ev.created_at else '',
+                ev.acknowledged_at.isoformat() if ev.acknowledged_at else '',
+            ])
+
+    resp = HttpResponse(buf.getvalue(), content_type='text/csv')
+    resp['Content-Disposition'] = 'attachment; filename="minersentinel-inventory.csv"'
+    return resp
+
+
+# Push channel status (ntfy / Gotify / webhook live; Web Push VAPID optional/deferred)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def push_channels_status(request):
+    """Report configured push delivery channels (no secrets)."""
+    settings = CollectorSettings.get_settings()
+    ntfy_ready = bool(settings.ntfy_enabled and (settings.ntfy_url or '').strip())
+    gotify_ready = bool(
+        settings.gotify_enabled
+        and (settings.gotify_url or '').strip()
+        and (settings.gotify_token or '').strip()
+    )
+    webhook_ready = bool(settings.webhook_enabled and (settings.webhook_url or '').strip())
+    return Response({
+        'web_push': {
+            'available': False,
+            'status': 'deferred',
+            'message': 'Browser Web Push (VAPID) deferred — use ntfy on Umbrel/LAN',
+        },
+        'ntfy': {
+            'available': True,
+            'status': 'ready' if ntfy_ready else 'configured' if (settings.ntfy_url or '').strip() else 'off',
+            'enabled': settings.ntfy_enabled,
+            'url_configured': bool((settings.ntfy_url or '').strip()),
+            'token_configured': bool((settings.ntfy_token or '').strip()),
+            'message': 'POST to topic URL (ntfy.sh or self-hosted)',
+        },
+        'gotify': {
+            'available': True,
+            'status': 'ready' if gotify_ready else 'off',
+            'enabled': settings.gotify_enabled,
+            'url_configured': bool((settings.gotify_url or '').strip()),
+            'token_configured': bool((settings.gotify_token or '').strip()),
+            'message': 'Gotify /message with app token',
+        },
+        'webhook': {
+            'available': True,
+            'status': 'ready' if webhook_ready else 'off',
+            'enabled': settings.webhook_enabled,
+            'url_configured': bool((settings.webhook_url or '').strip()),
+            'message': 'Generic JSON POST {title, message, severity, event_key}',
+        },
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def stratum_pool_compare(request):
+    """
+    Side-by-side: each device's primary/fallback stratum vs selected pool stats.
+    Does not poll every pool type concurrently — uses configured pool_type + latest sample.
+    """
+    settings = CollectorSettings.get_settings()
+    pool_type = settings.pool_type or 'ckpool'
+    address_field = {
+        'ckpool': 'ckpool_address',
+        'publicpool': 'publicpool_address',
+        'btcpowlab': 'btcpowlab_address',
+        'parasite': 'parasite_address',
+    }.get(pool_type, 'ckpool_address')
+    configured_address = getattr(settings, address_field, '') or ''
+
+    latest = PoolStats.objects.filter(pool_type=pool_type).order_by('-recorded_at').first()
+    selected_pool = {
+        'pool_type': pool_type,
+        'configured_address': configured_address,
+        'latest': UnifiedPoolSerializer(latest).data if latest else None,
+    }
+
+    devices = []
+    for device in Device.objects.filter(is_active=True).order_by('make', 'name'):
+        sysinfo = DeviceSystemInfo.objects.filter(device=device).order_by('-recorded_at').first()
+        primary = (sysinfo.primary_pool_url if sysinfo else None) or ''
+        fallback = (sysinfo.fallback_pool_url if sysinfo else None) or ''
+        devices.append({
+            'id': device.id,
+            'device_id': device.device_id,
+            'name': device.name,
+            'make': device.make,
+            'primary_pool_url': primary or None,
+            'primary_pool_user': sysinfo.primary_pool_user if sysinfo else None,
+            'fallback_pool_url': fallback or None,
+            'fallback_pool_user': sysinfo.fallback_pool_user if sysinfo else None,
+            'using_fallback': sysinfo.using_fallback_pool if sysinfo else None,
+            'stratum_host': _stratum_host(primary),
+            'matches_selected_pool_type': _stratum_hints_pool_type(primary, pool_type),
+        })
+
+    return Response({
+        'selected_pool': selected_pool,
+        'devices': devices,
+    })
+
+
+def _stratum_host(url: str) -> str:
+    if not url:
+        return ''
+    raw = url.replace('stratum+tcp://', '').replace('stratum+ssl://', '').replace('stratum://', '')
+    return raw.split('/')[0].split(':')[0].lower()
+
+
+def _stratum_hints_pool_type(url: str, pool_type: str) -> bool | None:
+    """Best-effort host keyword match; None when unknown."""
+    host = _stratum_host(url)
+    if not host:
+        return None
+    hints = {
+        'ckpool': ('ckpool', 'solo.ckpool', 'eusolo'),
+        'publicpool': ('public-pool', 'publicpool'),
+        'btcpowlab': ('btcpowlab',),
+        'parasite': ('parasite',),
+    }
+    keys = hints.get(pool_type) or ()
+    return any(k in host for k in keys) if keys else None
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def collector_status_view(request):
+    """Proxy data-service /status for honest collector health in Settings + Overview."""
+    import requests
+
+    data_service_url = _data_service_url()
+    try:
+        response = requests.get(f'{data_service_url}/status', timeout=5)
+        if response.ok:
+            data = response.json()
+            data['reachable'] = True
+            return Response(data)
+        return Response(
+            {
+                'reachable': False,
+                'status': 'unreachable',
+                'error': f'Data service returned {response.status_code}',
+            },
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+    except requests.exceptions.RequestException as e:
+        logger.warning(f'Collector status unreachable: {e}')
+        return Response(
+            {
+                'reachable': False,
+                'status': 'unreachable',
+                'error': 'Data collector service unavailable',
+                'last_success_at': None,
+                'next_run': None,
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def activity_events_list(request):
+    """Activity / alert journal feed.
+
+    kind=problem — warn/critical needing attention (default when open=true)
+    kind=highlight — celebrations / info / control audits
+    kind=all — everything
+    """
+    HIGHLIGHT_TYPES = ('best_difficulty', 'device_online')
+    PROBLEM_TYPES = (
+        'device_offline',
+        'hashrate_stagnation',
+        'auto_restart',
+        'temperature_high',
+        'fan_dead',
+        'pool_down',
+        'collector_down',
+        'expected_hashrate_drop',
+    )
+
+    # One-time cleanup: leftover highlight rows must not linger as "open problems"
+    AlertEvent.objects.filter(
+        event_type__in=HIGHLIGHT_TYPES,
+        acknowledged_at__isnull=True,
+        resolved_at__isnull=True,
+    ).update(acknowledged_at=timezone.now())
+
+    qs = AlertEvent.objects.all().order_by('-created_at')
+    open_only = str(request.query_params.get('open', '')).lower() in ('1', 'true', 'yes')
+    kind = (request.query_params.get('kind') or '').lower()
+    if not kind:
+        kind = 'problem' if open_only else 'all'
+
+    if open_only:
+        qs = qs.filter(resolved_at__isnull=True, acknowledged_at__isnull=True)
+
+    if kind == 'problem':
+        qs = qs.filter(
+            Q(severity__in=(AlertEvent.SEVERITY_WARN, AlertEvent.SEVERITY_CRITICAL))
+            | Q(event_type__in=PROBLEM_TYPES)
+        ).exclude(event_type__in=HIGHLIGHT_TYPES).exclude(event_type__startswith='user_')
+    elif kind == 'highlight':
+        qs = qs.filter(
+            Q(event_type__in=HIGHLIGHT_TYPES)
+            | Q(event_type__startswith='user_')
+            | Q(severity=AlertEvent.SEVERITY_INFO)
+        )
+
+    severity = request.query_params.get('severity')
+    if severity in ('info', 'warn', 'critical'):
+        qs = qs.filter(severity=severity)
+
+    event_type = request.query_params.get('event_type')
+    if event_type:
+        qs = qs.filter(event_type=event_type)
+
+    device_make = request.query_params.get('make')
+    device_key = request.query_params.get('device_id')
+    if device_make:
+        qs = qs.filter(Q(device_make=device_make) | Q(device__make=device_make))
+    if device_key:
+        qs = qs.filter(Q(device_key=device_key) | Q(device__device_id=device_key))
+
+    try:
+        limit = min(int(request.query_params.get('limit', 50)), 200)
+    except (TypeError, ValueError):
+        limit = 50
+
+    # Markers for charts: since= ISO timestamp
+    since = request.query_params.get('since')
+    if since:
+        try:
+            from django.utils.dateparse import parse_datetime
+            dt = parse_datetime(since)
+            if dt:
+                qs = qs.filter(created_at__gte=dt)
+        except Exception:
+            pass
+
+    open_base = AlertEvent.objects.filter(
+        resolved_at__isnull=True, acknowledged_at__isnull=True
+    ).exclude(event_type__in=HIGHLIGHT_TYPES).exclude(event_type__startswith='user_')
+    total_open = open_base.filter(
+        Q(severity__in=(AlertEvent.SEVERITY_WARN, AlertEvent.SEVERITY_CRITICAL))
+        | Q(event_type__in=PROBLEM_TYPES)
+    ).count()
+    critical_open = AlertEvent.objects.filter(
+        resolved_at__isnull=True,
+        acknowledged_at__isnull=True,
+        severity=AlertEvent.SEVERITY_CRITICAL,
+    ).exclude(event_type__in=HIGHLIGHT_TYPES).count()
+
+    events = list(qs[:limit])
+    return Response({
+        'results': AlertEventSerializer(events, many=True).data,
+        'open_count': total_open,
+        'critical_open_count': critical_open,
+        'kind': kind,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def activity_event_acknowledge(request, pk):
+    try:
+        event = AlertEvent.objects.get(pk=pk)
+    except AlertEvent.DoesNotExist:
+        return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+    event.acknowledged_at = timezone.now()
+    event.save(update_fields=['acknowledged_at'])
+    return Response(AlertEventSerializer(event).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def activity_event_snooze(request, pk):
+    try:
+        event = AlertEvent.objects.get(pk=pk)
+    except AlertEvent.DoesNotExist:
+        return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+    try:
+        minutes = int((request.data or {}).get('minutes', 60))
+    except (TypeError, ValueError):
+        minutes = 60
+    minutes = max(5, min(24 * 60, minutes))
+    event.muted_until = timezone.now() + timedelta(minutes=minutes)
+    event.save(update_fields=['muted_until'])
+    return Response(AlertEventSerializer(event).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def activity_event_resolve(request, pk):
+    try:
+        event = AlertEvent.objects.get(pk=pk)
+    except AlertEvent.DoesNotExist:
+        return Response({'detail': 'Not found'}, status=status.HTTP_404_NOT_FOUND)
+    event.resolved_at = timezone.now()
+    event.save(update_fields=['resolved_at'])
+    return Response(AlertEventSerializer(event).data)
 
 
 def _format_difficulty(difficulty):
