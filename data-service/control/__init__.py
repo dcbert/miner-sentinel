@@ -1,4 +1,4 @@
-"""Device control adapters (MinerWatch-style actions)."""
+"""Device control adapters (reboot, fan, frequency, pool, workmode)."""
 
 from control.capabilities import CAPABILITIES_BY_MAKE, capabilities_for_make
 from control.dispatcher import execute_control

@@ -1,5 +1,5 @@
 /**
- * MinerWatch-style Controls tab: capability-gated reboot, fan, freq, voltage,
+ * Per-device Controls tab: capability-gated reboot, fan, freq, voltage,
  * pause/resume, pool change, Avalon workmode. Confirm dialogs for destructive actions.
  */
 import { useEffect, useMemo, useState } from 'react'

@@ -691,7 +691,7 @@ def control_capabilities():
 @app.route('/control', methods=['POST'])
 def control_device():
     """
-    Execute a MinerWatch-style control action.
+    Execute a remote device control action.
 
     Body: { make, device_id, action, params? }
     LAN credentials stay in this service; backend proxies here.

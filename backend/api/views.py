@@ -794,7 +794,7 @@ def test_push_notification(request):
 
 
 # ---------------------------------------------------------------------------
-# Device control (MinerWatch-style) — proxies to data-service LAN adapters
+# Device control — proxies to data-service LAN adapters
 # ---------------------------------------------------------------------------
 
 CONTROL_CAPABILITIES = {
