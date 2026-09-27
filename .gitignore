@@ -119,3 +119,7 @@ venv/
 env/
 ENV/
 .venv/
+
+# Local tooling / caches (not part of the app)
+.tools/
+.docker-data/

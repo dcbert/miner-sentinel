@@ -7,7 +7,7 @@ services:
       APP_PORT: 80
 
   db:
-    image: postgres:17.7@sha256:bac8128cd62a35471a1e97966861aa2ac88c8d2f408767a425ae70695a607c99
+    image: postgres:17.7@sha256:2006493727bd5277eece187319af1ef82b4cf82cf4fc1ed00da0775b646ac2a4
     user: "1000:1000"
     restart: on-failure
     stop_grace_period: 1m
