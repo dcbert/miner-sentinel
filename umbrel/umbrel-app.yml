@@ -1,14 +1,20 @@
 manifestVersion: 1
 id: miner-sentinel
+storage:
+  dataRoot: data
 category: bitcoin
 name: MinerSentinel
-version: "1.0.0"
+version: "1.1.1"
 tagline: Multi-make Bitcoin mining monitor for home ASIC fleets
 description: >-
   MinerSentinel is a self-hosted monitoring solution for Bitcoin home miners.
   It unifies Bitaxe, Avalon, NMAxe, NerdNOS, and other makes into one device registry
   and dashboard for fleet performance, hardware health, pool stats, cost analysis,
   and alerts—with all data stored locally.
+
+
+  ⚙️ After install, open the app and sign in with username **admin** and the
+  password shown by Umbrel for this app. Then add miners under Settings → Devices.
 
 
   **Real-Time Device Monitoring**
@@ -25,7 +31,7 @@ description: >-
 
   **Pool Integration**
 
-  Native support for CKPool and Public Pool solo mining statistics.
+  Native support for CKPool, Public Pool, and BTC PoW Lab solo mining statistics.
   Track best shares, workers, and pool-side hashrate, plus solo-mining probability estimates.
 
 
@@ -46,14 +52,36 @@ description: >-
   Runs entirely on your own hardware. All metrics stay in your PostgreSQL database.
   Packaged for Umbrel with multi-architecture Docker images.
 
-releaseNotes: ""
+releaseNotes: >-
+  MinerSentinel 1.1.1 brings a unified multi-make device model and broader pool support:
+
+
+  - Unified device registry for Bitaxe, Avalon, NMAxe, NerdNOS, and related firmwares
+
+  - Shared mining/hardware/system metrics tables with improved dashboards and time-range controls
+
+  - Discord webhook alerts alongside Telegram
+
+  - BTC PoW Lab Hybrid Solo pool statistics (configure under Settings)
+
+  - Packaging fixes: correct Django SECRET_KEY/DEBUG env wiring and healthier Postgres startup
+
+
+  After updating, open Settings → Devices to confirm your miners. Pool and notification
+  options remain under Settings.
+
 developer: Davide Bert
 website: https://github.com/dcbert/miner-sentinel
 dependencies: []
 repo: https://github.com/dcbert/miner-sentinel
 support: https://github.com/dcbert/miner-sentinel/issues
-port: 3080
-gallery: []
+port: 3082
+gallery:
+  - 1.jpg
+  - 2.jpg
+  - 3.jpg
+  - 4.jpg
+  - 5.jpg
 path: ""
 defaultUsername: "admin"
 deterministicPassword: true

@@ -13,9 +13,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version tag to publish (e.g. v1.0.3)'
+        description: 'Version tag to publish (e.g. v1.1.1)'
         required: true
-        default: 'v1.0.3'
+        default: 'v1.1.1'
 
 env:
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -86,9 +86,14 @@ jobs:
         run: |
           echo "Fetching digests for version ${{ inputs.version }}..."
 
-          BACKEND_DIGEST=$(docker buildx imagetools inspect ${{ env.DOCKER_HUB_USER }}/minersentinel-backend:latest --format '{{json .Manifest.Digest}}' | tr -d '"')
-          FRONTEND_DIGEST=$(docker buildx imagetools inspect ${{ env.DOCKER_HUB_USER }}/minersentinel-frontend:latest --format '{{json .Manifest.Digest}}' | tr -d '"')
-          DATA_SERVICE_DIGEST=$(docker buildx imagetools inspect ${{ env.DOCKER_HUB_USER }}/minersentinel-data-service:latest --format '{{json .Manifest.Digest}}' | tr -d '"')
+          digest_for() {
+            docker buildx imagetools inspect "$1:${{ inputs.version }}" --format '{{json .Manifest}}' \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])'
+          }
+
+          BACKEND_DIGEST=$(digest_for ${{ env.DOCKER_HUB_USER }}/minersentinel-backend)
+          FRONTEND_DIGEST=$(digest_for ${{ env.DOCKER_HUB_USER }}/minersentinel-frontend)
+          DATA_SERVICE_DIGEST=$(digest_for ${{ env.DOCKER_HUB_USER }}/minersentinel-data-service)
 
           echo "backend_digest=$BACKEND_DIGEST" >> $GITHUB_OUTPUT
           echo "frontend_digest=$FRONTEND_DIGEST" >> $GITHUB_OUTPUT
@@ -101,50 +106,37 @@ jobs:
       - name: Update umbrel/docker-compose.yml with new digests
         env:
           DOCKER_HUB_USER: ${{ env.DOCKER_HUB_USER }}
+          IMAGE_VERSION: ${{ inputs.version }}
           BACKEND_DIGEST: ${{ steps.digests.outputs.backend_digest }}
           FRONTEND_DIGEST: ${{ steps.digests.outputs.frontend_digest }}
           DATA_SERVICE_DIGEST: ${{ steps.digests.outputs.data_service_digest }}
         run: |
           echo "Updating umbrel/docker-compose.yml..."
 
-          # Create backup
           cp umbrel/docker-compose.yml umbrel/docker-compose.yml.bak
 
-          # Use Python for reliable cross-platform replacement (more robust than sed)
           python3 - << 'PYEOF'
-          import re
           import os
+          import re
+          from pathlib import Path
 
           user = os.environ["DOCKER_HUB_USER"]
-          backend = os.environ["BACKEND_DIGEST"]
-          frontend = os.environ["FRONTEND_DIGEST"]
-          data = os.environ["DATA_SERVICE_DIGEST"]
+          version = os.environ["IMAGE_VERSION"]
+          replacements = {
+              f"{user}/minersentinel-backend": f"{user}/minersentinel-backend:{version}@{os.environ['BACKEND_DIGEST']}",
+              f"{user}/minersentinel-frontend": f"{user}/minersentinel-frontend:{version}@{os.environ['FRONTEND_DIGEST']}",
+              f"{user}/minersentinel-data-service": f"{user}/minersentinel-data-service:{version}@{os.environ['DATA_SERVICE_DIGEST']}",
+          }
 
-          with open('umbrel/docker-compose.yml', 'r') as f:
-              content = f.read()
-
-          # Update backend
-          content = re.sub(
-              rf'(image: {user}/minersentinel-backend:).*@sha256:[a-f0-9]+',
-              rf'\1latest@{backend}',
-              content
-          )
-          # Update frontend
-          content = re.sub(
-              rf'(image: {user}/minersentinel-frontend:).*@sha256:[a-f0-9]+',
-              rf'\1latest@{frontend}',
-              content
-          )
-          # Update data-service
-          content = re.sub(
-              rf'(image: {user}/minersentinel-data-service:).*@sha256:[a-f0-9]+',
-              rf'\1latest@{data}',
-              content
-          )
-
-          with open('umbrel/docker-compose.yml', 'w') as f:
-              f.write(content)
-
+          path = Path("umbrel/docker-compose.yml")
+          content = path.read_text()
+          for prefix, replacement in replacements.items():
+              content = re.sub(
+                  rf"image:\s*{re.escape(prefix)}:[^\s]+",
+                  f"image: {replacement}",
+                  content,
+              )
+          path.write_text(content)
           print("✓ umbrel/docker-compose.yml updated successfully")
           PYEOF
 

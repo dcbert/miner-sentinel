@@ -3,12 +3,12 @@
 # MinerSentinel Umbrel Deployment Script
 # Builds multi-arch images and updates Umbrel docker-compose with new hashes
 
-set -e
+set -euo pipefail
 
 # Configuration
-DOCKER_HUB_USER="dcbert"
-VERSION="${VERSION:-v1.0.2}"
-IMAGES=("backend" "frontend" "data-service")
+DOCKER_HUB_USER="${DOCKER_HUB_USER:-dcbert}"
+VERSION="${VERSION:-v1.1.1}"
+COMPOSE_FILE="umbrel/docker-compose.yml"
 
 # Colors for output
 RED='\033[0;31m'
@@ -21,11 +21,15 @@ echo -e "${GREEN}MinerSentinel Umbrel Deployment${NC}"
 echo -e "${GREEN}Version: ${VERSION}${NC}"
 echo -e "${GREEN}========================================${NC}"
 
-# Function to build and push a single image
+# Detect sed in-place flag (GNU vs BSD)
+if sed --version >/dev/null 2>&1; then
+  SED_INPLACE=(sed -i)
+else
+  SED_INPLACE=(sed -i '')
+fi
+
 build_and_push() {
     local service=$1
-    local dockerfile_path=$2
-    local context_path=$3
     local image_name="${DOCKER_HUB_USER}/minersentinel-${service}"
 
     echo -e "\n${YELLOW}Building ${service}...${NC}"
@@ -33,64 +37,74 @@ build_and_push() {
     docker buildx build --platform linux/arm64,linux/amd64 \
         --tag "${image_name}:latest" \
         --tag "${image_name}:${VERSION}" \
-        -f "${dockerfile_path}" "${context_path}" \
+        -f "${service}/Dockerfile" "./${service}" \
         --push
 
     echo -e "${GREEN}✓ ${service} built and pushed${NC}"
 }
 
-# Function to get image digest
 get_digest() {
     local image=$1
-    docker buildx imagetools inspect "${image}:latest" --format '{{json .Manifest.Digest}}' | tr -d '"'
+    local tag=$2
+    docker buildx imagetools inspect "${image}:${tag}" --format '{{json .Manifest}}' \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])'
 }
 
-# Function to update umbrel docker-compose with new hashes
 update_umbrel_compose() {
-    local compose_file="umbrel/docker-compose.yml"
+    echo -e "\n${YELLOW}Fetching image digests for ${VERSION}...${NC}"
 
-    echo -e "\n${YELLOW}Fetching image digests...${NC}"
-
-    # Get digests for each image
-    BACKEND_DIGEST=$(get_digest "${DOCKER_HUB_USER}/minersentinel-backend")
-    FRONTEND_DIGEST=$(get_digest "${DOCKER_HUB_USER}/minersentinel-frontend")
-    DATA_SERVICE_DIGEST=$(get_digest "${DOCKER_HUB_USER}/minersentinel-data-service")
+    BACKEND_DIGEST=$(get_digest "${DOCKER_HUB_USER}/minersentinel-backend" "${VERSION}")
+    FRONTEND_DIGEST=$(get_digest "${DOCKER_HUB_USER}/minersentinel-frontend" "${VERSION}")
+    DATA_SERVICE_DIGEST=$(get_digest "${DOCKER_HUB_USER}/minersentinel-data-service" "${VERSION}")
 
     echo "Backend digest: ${BACKEND_DIGEST}"
     echo "Frontend digest: ${FRONTEND_DIGEST}"
     echo "Data-service digest: ${DATA_SERVICE_DIGEST}"
 
-    echo -e "\n${YELLOW}Updating ${compose_file}...${NC}"
+    echo -e "\n${YELLOW}Updating ${COMPOSE_FILE}...${NC}"
 
-    # Create backup
-    cp "${compose_file}" "${compose_file}.bak"
+    cp "${COMPOSE_FILE}" "${COMPOSE_FILE}.bak"
 
-    # Update backend image line
-    sed -i '' "s|image: ${DOCKER_HUB_USER}/minersentinel-backend:.*@sha256:.*|image: ${DOCKER_HUB_USER}/minersentinel-backend:latest@${BACKEND_DIGEST}|" "${compose_file}"
+    python3 - << PYEOF
+import re
+from pathlib import Path
 
-    # Update frontend image line
-    sed -i '' "s|image: ${DOCKER_HUB_USER}/minersentinel-frontend:.*@sha256:.*|image: ${DOCKER_HUB_USER}/minersentinel-frontend:latest@${FRONTEND_DIGEST}|" "${compose_file}"
+user = "${DOCKER_HUB_USER}"
+version = "${VERSION}"
+backend = "${BACKEND_DIGEST}"
+frontend = "${FRONTEND_DIGEST}"
+data = "${DATA_SERVICE_DIGEST}"
+path = Path("${COMPOSE_FILE}")
+content = path.read_text()
 
-    # Update data-service image line
-    sed -i '' "s|image: ${DOCKER_HUB_USER}/minersentinel-data-service:.*@sha256:.*|image: ${DOCKER_HUB_USER}/minersentinel-data-service:latest@${DATA_SERVICE_DIGEST}|" "${compose_file}"
-
-    echo -e "${GREEN}✓ Updated ${compose_file}${NC}"
-    echo -e "${YELLOW}Backup saved to ${compose_file}.bak${NC}"
+replacements = {
+    f"{user}/minersentinel-backend": f"{user}/minersentinel-backend:{version}@{backend}",
+    f"{user}/minersentinel-frontend": f"{user}/minersentinel-frontend:{version}@{frontend}",
+    f"{user}/minersentinel-data-service": f"{user}/minersentinel-data-service:{version}@{data}",
 }
 
-# Main execution
+for prefix, replacement in replacements.items():
+    content = re.sub(
+        rf"image:\s*{re.escape(prefix)}:[^\s]+",
+        f"image: {replacement}",
+        content,
+    )
+
+path.write_text(content)
+print("✓ compose updated")
+PYEOF
+
+    echo -e "${GREEN}✓ Updated ${COMPOSE_FILE}${NC}"
+    echo -e "${YELLOW}Backup saved to ${COMPOSE_FILE}.bak${NC}"
+}
+
 main() {
     echo -e "\n${YELLOW}Step 1: Building and pushing images${NC}"
     echo "----------------------------------------"
 
-    # Build backend
-    build_and_push "backend" "backend/Dockerfile" "./backend"
-
-    # Build frontend
-    build_and_push "frontend" "frontend/Dockerfile" "./frontend"
-
-    # Build data-service
-    build_and_push "data-service" "data-service/Dockerfile" "./data-service"
+    build_and_push "backend"
+    build_and_push "frontend"
+    build_and_push "data-service"
 
     echo -e "\n${YELLOW}Step 2: Updating Umbrel docker-compose${NC}"
     echo "----------------------------------------"
@@ -105,26 +119,22 @@ main() {
     echo -e "  Frontend:     ${FRONTEND_DIGEST}"
     echo -e "  Data-service: ${DATA_SERVICE_DIGEST}"
     echo -e "\nNext steps:"
-    echo -e "  1. Review changes: git diff umbrel/docker-compose.yml"
-    echo -e "  2. Commit changes: git add -A && git commit -m 'Update Umbrel images to ${VERSION}'"
-    echo -e "  3. Push to repo: git push"
+    echo -e "  1. Confirm umbrel/umbrel-app.yml version matches ${VERSION#v}"
+    echo -e "  2. Review: git diff umbrel/"
+    echo -e "  3. Commit, then PR the umbrel/ contents into getumbrel/umbrel-apps/miner-sentinel/"
 }
 
-# Parse arguments
 case "${1:-all}" in
     build)
-        echo "Building images only..."
-        build_and_push "backend" "backend/Dockerfile" "./backend"
-        build_and_push "frontend" "frontend/Dockerfile" "./frontend"
-        build_and_push "data-service" "data-service/Dockerfile" "./data-service"
+        build_and_push "backend"
+        build_and_push "frontend"
+        build_and_push "data-service"
         ;;
     update)
-        echo "Updating Umbrel compose only..."
         update_umbrel_compose
         ;;
     backend|frontend|data-service)
-        echo "Building ${1} only..."
-        build_and_push "${1}" "${1}/Dockerfile" "./${1}"
+        build_and_push "${1}"
         ;;
     all|"")
         main
@@ -141,7 +151,8 @@ case "${1:-all}" in
         echo "  data-service   - Build data-service only"
         echo ""
         echo "Environment variables:"
-        echo "  VERSION        - Image version tag (default: v1.0.0)"
+        echo "  VERSION          - Image version tag (default: v1.1.1)"
+        echo "  DOCKER_HUB_USER  - Docker Hub namespace (default: dcbert)"
         exit 1
         ;;
 esac
