@@ -536,5 +536,14 @@ This project is licensed under the [MIT License](LICENSE).
 - **Discussions**: [GitHub Discussions](https://github.com/dcbert/miner-sentinel/discussions)
 
 ---
+## Star History
+
+<a href="https://www.star-history.com/?repos=dcbert%2Fminer-sentinel&type=date&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=dcbert/miner-sentinel&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=dcbert/miner-sentinel&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=dcbert/miner-sentinel&type=date&legend=bottom-right" />
+ </picture>
+</a>
 
 *Built with ⚡ for the Bitcoin home mining community*
